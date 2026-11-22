@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { FirmaPad } from "@/components/firma-pad"
+import { MAX_FOTOS, agregarFotos, aplicarRespuesta, porcentajeAvance } from "@/lib/offline/captura"
 import { capturasDb, type CapturaLocal } from "@/lib/offline/db"
 import { prepararFoto } from "@/lib/offline/fotos"
 import { estaEnLinea, useEnLinea } from "@/lib/offline/red"
@@ -66,37 +67,39 @@ export function Captura({
     )
   }, [inspeccionId, respuestasIniciales, observacionesIniciales, nombreContacto])
 
-  // Autoguardado local en cada cambio
-  function actualizar(cambio: Partial<CapturaLocal>) {
+  // Autoguardado local en cada cambio. El cambio se calcula siempre sobre el
+  // estado más reciente (`prev`): con toques seguidos o tras procesar una foto,
+  // el `c` del render anterior ya está viejo y pisaría respuestas.
+  function actualizar(cambio: Partial<CapturaLocal> | ((prev: CapturaLocal) => Partial<CapturaLocal>)) {
     setC((prev) => {
       if (!prev) return prev
-      const next = { ...prev, ...cambio, actualizadaEn: new Date().toISOString() }
+      const parcial = typeof cambio === "function" ? cambio(prev) : cambio
+      const next = { ...prev, ...parcial, actualizadaEn: new Date().toISOString() }
       capturasDb.put(next)
       return next
     })
   }
 
   function responder(reactivoId: string, cambio: Partial<RespuestaChecklist>) {
-    if (!c) return
-    const existe = c.respuestas.some((r) => r.reactivoId === reactivoId)
-    const respuestas = existe
-      ? c.respuestas.map((r) => (r.reactivoId === reactivoId ? { ...r, ...cambio } : r))
-      : [...c.respuestas, { reactivoId, valor: null, ...cambio }]
-    actualizar({ respuestas })
+    actualizar((prev) => ({ respuestas: aplicarRespuesta(prev.respuestas, reactivoId, cambio) }))
   }
 
   const secciones = useMemo(() => [...new Set(reactivos.map((r) => r.seccion))], [reactivos])
   const mapa = new Map(c?.respuestas.map((r) => [r.reactivoId, r]))
   const requeridos = reactivos.filter((r) => r.requerido)
   const listos = requeridos.filter((r) => respondido(r, mapa.get(r.id))).length
-  const progreso = Math.round((listos / requeridos.length) * 100)
+  const progreso = porcentajeAvance(listos, requeridos.length)
 
-  async function agregarFotos(files: FileList | null) {
+  async function tomarFotos(files: FileList | null) {
     if (!files?.length || !c) return
+    const espacio = MAX_FOTOS - c.fotos.length
+    if (espacio <= 0) return void toast.error(`Máximo ${MAX_FOTOS} fotos por inspección`)
+    const elegidas = [...files].slice(0, espacio)
+    if (elegidas.length < files.length) toast.warning(`Solo caben ${espacio} foto(s) más (máximo ${MAX_FOTOS})`)
     setProcesandoFoto(true)
     try {
-      const nuevas = await Promise.all([...files].map(prepararFoto))
-      actualizar({ fotos: [...c.fotos, ...nuevas] })
+      const nuevas = await Promise.all(elegidas.map(prepararFoto))
+      actualizar((prev) => ({ fotos: agregarFotos(prev.fotos, nuevas).fotos }))
       if (nuevas.some((f) => f.lat == null)) toast.warning("Sin permiso de ubicación: la foto se guardó sin coordenadas")
     } catch {
       toast.error("No se pudo procesar la foto")
@@ -220,7 +223,7 @@ export function Captura({
               <img src={f.dataUrl} alt={f.nombre} className="aspect-square w-full rounded-lg object-cover" />
               <button
                 type="button"
-                onClick={() => actualizar({ fotos: c.fotos.filter((x) => x.id !== f.id) })}
+                onClick={() => actualizar((prev) => ({ fotos: prev.fotos.filter((x) => x.id !== f.id) }))}
                 className="absolute top-1 right-1 rounded-full bg-black/60 p-1 text-white"
                 aria-label="Quitar foto"
               >
@@ -238,7 +241,7 @@ export function Captura({
             {procesandoFoto ? "Procesando…" : "Tomar foto"}
           </button>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => agregarFotos(e.target.files)} />
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => tomarFotos(e.target.files)} />
       </section>
 
       <section className="space-y-3">
