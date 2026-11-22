@@ -3,7 +3,7 @@ import Link from "next/link"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 import QRCode from "qrcode"
-import { ArrowLeftIcon } from "lucide-react"
+import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { getRamaActual } from "@/lib/data/catalogos"
 import { getDictamenCompleto } from "@/lib/data/dictamenes"
@@ -17,9 +17,8 @@ export async function generateMetadata(props: PageProps<"/dictamenes/[id]">): Pr
 
 /**
  * Vista del dictamen con el formato aproximado de la demo. «Imprimir / PDF»
- * usa el navegador. BACKEND: /api/dictamen/[id] generará Word/PDF con
- * docxtemplater + Gotenberg usando la plantilla .docx del cliente y estos
- * mismos campos (ver Plantilla.campos en el seed).
+ * usa el navegador; «Word» y «PDF» salen de /api/dictamen/[id] con la
+ * plantilla .docx del cliente (docxtemplater + Gotenberg).
  */
 export default async function DictamenPage(props: PageProps<"/dictamenes/[id]">) {
   const { id } = await props.params
@@ -44,6 +43,14 @@ export default async function DictamenPage(props: PageProps<"/dictamenes/[id]">)
         </Button>
         <div className="ml-auto flex gap-2">
           <Button variant="outline" render={<a href={urlVerificacion} target="_blank" rel="noreferrer" />}>Verificación pública</Button>
+          <Button variant="outline" render={<a href={`/api/dictamen/${dictamen.id}?formato=docx`} download />}>
+            <DownloadIcon /> Word
+          </Button>
+          {process.env.GOTENBERG_URL && (
+            <Button variant="outline" render={<a href={`/api/dictamen/${dictamen.id}?formato=pdf`} download />}>
+              <DownloadIcon /> PDF
+            </Button>
+          )}
           <ImprimirButton />
         </div>
       </div>

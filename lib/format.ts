@@ -1,4 +1,5 @@
-const TZ = "America/Mexico_City"
+/** Zona horaria de la operación (coincide con tenants.zona_horaria) */
+export const TZ = "America/Mexico_City"
 
 const fFecha = new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric", timeZone: TZ })
 const fHora = new Intl.DateTimeFormat("es-MX", { hour: "2-digit", minute: "2-digit", timeZone: TZ })

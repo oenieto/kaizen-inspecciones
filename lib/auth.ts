@@ -1,23 +1,30 @@
 import "server-only"
-import { cookies } from "next/headers"
+import { cache } from "react"
 import { redirect } from "next/navigation"
-import { getTenant, getUsuario } from "@/lib/data/catalogos"
+import { createClient } from "@/lib/supabase/server"
+import { mapTenant, mapUsuario } from "@/lib/data/mappers"
 import { puede, type Accion } from "@/lib/permisos"
 
 /**
- * Sesión de demo: una cookie con el id del usuario elegido en /login.
- * BACKEND: reemplazar por Supabase Auth (createServerClient + getUser) y leer
- * el rol desde la tabla usuarios. La firma de getSession() se mantiene.
+ * Sesión de Supabase Auth. El JWT se verifica con getClaims() y el rol y el
+ * tenant salen de la tabla usuarios (no del token), así que un cambio de rol
+ * aplica en la siguiente petición. Memoizada por petición.
  */
-export const SESSION_COOKIE = "uv_demo_session"
-
-export async function getSession() {
-  const id = (await cookies()).get(SESSION_COOKIE)?.value
-  if (!id) return null
-  const usuario = await getUsuario(id)
-  if (!usuario) return null
-  return { usuario, tenant: await getTenant() }
-}
+export const getSession = cache(async () => {
+  const supabase = await createClient()
+  const { data } = await supabase.auth.getClaims()
+  const uid = data?.claims.sub
+  if (!uid) return null
+  const { data: fila } = await supabase
+    .from("usuarios")
+    .select("*, tenant:tenants(*)")
+    .eq("id", uid)
+    .eq("activo", true)
+    .maybeSingle()
+  if (!fila?.tenant) return null
+  const { tenant, ...usuario } = fila
+  return { usuario: mapUsuario(usuario), tenant: mapTenant(tenant) }
+})
 
 export type Session = NonNullable<Awaited<ReturnType<typeof getSession>>>
 
@@ -28,7 +35,7 @@ export async function requireSession() {
   return s
 }
 
-/** Para server actions: valida sesión y permiso. */
+/** Para server actions: valida sesión y permiso (RLS lo vuelve a validar en la BD). */
 export async function requirePermiso(accion: Accion) {
   const s = await getSession()
   if (!s) throw new Error("Sesión expirada")

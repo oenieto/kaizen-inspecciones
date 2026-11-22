@@ -1,20 +1,23 @@
 # Kaizen · Demo UV Energía — Sistema para Unidades de Inspección
 
-Frontend funcional de la demo: agenda de verificaciones, expediente digital, PWA de campo offline y dictamen automático con folio y QR. Por ahora corre con **datos en memoria**. Está estructurado para que el backend (Supabase) se conecte sin tocar las pantallas.
+Agenda de verificaciones, expediente digital, PWA de campo offline y dictamen automático con folio y QR. Next.js 16 + **Supabase** (Postgres con RLS por tenant, Auth, Storage), Claude para la revisión de completitud y Gotenberg para el PDF.
 
 > Datos 100 % ficticios. Nunca nombres reales de clientes.
 
 ## Arranque
 
-Requiere **Node 24 LTS** (`.nvmrc`). Node 26 rompe ESLint y el loader de Tailwind.
+Requiere **Node 24 LTS** (`.nvmrc`; Node 26 rompe ESLint y el loader de Tailwind) y **Docker** para el Supabase local.
 
 ```bash
 nvm use
 pnpm install
-pnpm dev            # http://localhost:3000
+pnpm exec supabase start        # Postgres, Auth, REST y Storage locales (imprime las llaves)
+cp .env.example .env.local      # pega la URL y las llaves que imprimió supabase start
+pnpm db:reset                   # aplica supabase/migrations y carga el seed
+pnpm dev                        # http://localhost:3000
 ```
 
-Inicia sesión con cualquier cuenta de demo; cada una es un rol:
+Con `MODO_DEMO=true` el login muestra las cuentas de demo y precarga `SEED_PASSWORD`; cada cuenta es un rol:
 
 | Cuenta | Rol | Entra a |
 |---|---|---|
@@ -23,7 +26,9 @@ Inicia sesión con cualquier cuenta de demo; cada una es un rol:
 | responsable@demo.uv | Responsable técnico | Revisa y **aprueba dictámenes** |
 | cruiz@demo.uv (y atorres, jsalinas) | Inspector | Solo `/campo` (PWA) |
 
-Configuración → «Reiniciar datos de demo» regresa todo al seed entre ensayos.
+Configuración → «Reiniciar datos de demo» (solo con `MODO_DEMO=true`) vuelve a cargar el seed entre ensayos. Desde la terminal: `pnpm seed`.
+
+Opcionales: `ANTHROPIC_API_KEY` (revisión con IA; sin ella el semáforo usa solo reglas), `GOTENBERG_URL` (PDF del dictamen: `docker run --rm -p 3001:3000 gotenberg/gotenberg:8`), `N8N_WEBHOOK_URL` (avisos), `NEXT_PUBLIC_MAPBOX_TOKEN` (mapa real).
 
 ## Guion que ya funciona de punta a punta
 
@@ -31,7 +36,7 @@ Configuración → «Reiniciar datos de demo» regresa todo al seed entre ensayo
 2. **Inspector** (en el celular) abre `/campo` → ruta del día → captura. Toca **En línea** para simular modo avión: el checklist, las fotos (con GPS, hora y hash) y las firmas se guardan en IndexedDB.
 3. Al volver la señal, la cola se sincroniza sola y la inspección pasa a **En revisión**.
 4. **Responsable** abre el expediente: el semáforo de completitud (IA) marca faltantes y sugiere la redacción de cada NC → **Aprobar y emitir dictamen**.
-5. Se genera el dictamen con **folio consecutivo** y **QR**; el QR abre `/verificar/[token]` (pública, sin sesión).
+5. Se genera el dictamen con **folio consecutivo** y **QR**; el QR abre `/verificar/[token]` (pública, sin sesión). El dictamen se descarga en Word (plantilla del cliente) o PDF.
 
 ## Rutas
 
@@ -46,6 +51,7 @@ Configuración → «Reiniciar datos de demo» regresa todo al seed entre ensayo
 | `/configuracion` | Normas, checklists, plantillas, usuarios/competencias, branding (solo admin) |
 | `/campo` · `/campo/[inspeccionId]` | PWA del inspector: ruta del día y captura offline |
 | `/verificar/[token]` | Verificación pública del dictamen |
+| `/api/dictamen/[id]?formato=docx\|pdf` | Dictamen con la plantilla .docx del tenant (PDF vía Gotenberg) |
 
 ## Estructura
 
@@ -55,13 +61,19 @@ app/(panel)/<módulo>/  page.tsx + actions.ts (server actions con zod) + compone
 app/campo/             PWA: layout, ruta del día, captura offline, actions.ts de sincronización
 app/verificar/         página pública del QR
 config/ramas/          TODO lo que cambia por giro: normas, checklist, catálogos, textos
+app/api/dictamen/      Word/PDF del dictamen
 lib/types.ts           modelo de dominio = contrato con el backend
-lib/data/              capa de datos (hoy en memoria) ← aquí se conecta Supabase
-lib/auth.ts            sesión (hoy cookie de demo) ← aquí va Supabase Auth
-lib/permisos.ts        matriz rol → acciones (UI y server actions)
-lib/ia/completitud.ts  semáforo de completitud y redacción de NC (hoy reglas; luego LLM)
+lib/data/              capa de datos: consultas Supabase (RLS) → formas de lib/types.ts
+lib/supabase/          clientes (servidor con cookies, navegador, service_role) y tipos generados
+lib/auth.ts            sesión de Supabase Auth; rol y tenant salen de la tabla usuarios
+lib/permisos.ts        matriz rol → acciones (UI y server actions; app.puede() en SQL la replica)
+lib/ia/completitud.ts  semáforo: reglas deterministas + Claude con salida estructurada
+lib/documentos/        llenado de la plantilla .docx (docxtemplater) y PDF (Gotenberg)
 lib/offline/           Dexie (IndexedDB), estado de red, fotos, cola de sincronización
-db/seed.ts             datos de demo (lo mismo que debe insertar `pnpm seed`)
+supabase/migrations/   esquema, seguridad (RLS, Storage) y funciones de flujo
+db/seed.ts             datos de demo; db/sembrar.ts los carga (`pnpm seed`)
+db/pruebas/            pruebas de integración contra el Supabase local (`pnpm test:db`)
+templates/             plantilla .docx por defecto (scripts/plantilla-dictamen.ts la genera)
 public/sw.js           service worker de la PWA (solo en producción)
 ```
 
@@ -71,24 +83,33 @@ public/sw.js           service worker de la PWA (solo en producción)
 - Cada mutación es una server action en `actions.ts`: `requirePermiso()` + `zod` + `ejecutar()` (devuelve `ActionResult` para el toast) + `revalidatePath`.
 - Next 16 con **Cache Components**: toda lectura dinámica va dentro de `<Suspense>` (los layouts ya lo hacen) y la capa de datos llama `connection()`.
 
-## Para conectar el backend (Antonio)
+## Backend
 
-Las firmas de `lib/data/*` son el contrato. Hay que reemplazar el cuerpo de cada función por la consulta a Supabase y devolver las mismas formas de `lib/types.ts` (snake_case → camelCase). Puntos marcados con `BACKEND:` en el código:
+Las firmas de `lib/data/*` siguen siendo el contrato con las pantallas; por dentro consultan Supabase con la sesión del usuario, así que **toda lectura pasa por RLS**.
 
-| Archivo | Qué cambia |
+| Pieza | Cómo está resuelto |
 |---|---|
-| `lib/data/store.ts` | Se elimina. |
-| `lib/data/*.ts` | Consultas Supabase con RLS por `tenant_id`. |
-| `lib/data/inspecciones.ts` → `aprobarYEmitir` | Función SQL transaccional: folio sin huecos (`SELECT … FOR UPDATE`). |
-| `lib/data/bitacora.ts` | Tabla solo inserción (sin UPDATE/DELETE), idealmente por trigger. |
-| `lib/auth.ts` + `app/(auth)/actions.ts` | Supabase Auth; `getSession()` mantiene su forma. `proxy.ts` revisa la cookie de Supabase. |
-| `app/campo/actions.ts` | Fotos a Storage con URL firmada; la acción recibe rutas, no data URLs. |
-| `/api/dictamen/[id]` (por crear) | docxtemplater + Gotenberg con la plantilla del cliente; campos en `Plantilla.campos`. |
-| `lib/ia/completitud.ts` | LLM con salida estructurada; misma forma de retorno. |
+| Aislamiento | Cada tabla lleva `tenant_id` (por defecto el del usuario). Políticas RLS por tenant y rol; el inspector solo ve sus inspecciones. Privilegios mínimos: escritura directa solo en alta de clientes, instalaciones y citas. |
+| Flujo | `reprogramar_inspeccion`, `cancelar_inspeccion`, `sincronizar_captura`, `devolver_a_campo` y `aprobar_y_emitir` son funciones SQL transaccionales: validan permiso y estatus, aplican el cambio y escriben la bitácora. Sus mensajes llegan tal cual al toast. |
+| Folio | `aprobar_y_emitir` bloquea la fila `(tenant, año)` de `folios`: aprobaciones simultáneas se serializan y una transacción fallida no consume consecutivo. |
+| Bitácora | Solo la escriben triggers y funciones (`auth.uid()` como autor). Un trigger rechaza UPDATE/DELETE/TRUNCATE en `bitacora` y `dictamenes`. |
+| Auth | Supabase Auth con correo y contraseña (registro público deshabilitado). `proxy.ts` refresca el token y protege rutas; `getSession()` conserva su forma. |
+| Evidencias | Bucket privado `evidencias/{tenant}/{inspección}/{foto}.jpg`. La PWA pide URLs firmadas de subida (`prepararSubidaFotos`), sube directo desde el dispositivo y la acción recibe rutas; la BD verifica que el objeto exista. Las pantallas reciben URLs firmadas de 1 h. |
+| Dictamen | `/api/dictamen/[id]` llena la plantilla del bucket `plantillas/{tenant}/dictamen.docx` (o `templates/dictamen.docx`) con docxtemplater; etiquetas en `Plantilla.campos`. PDF con Gotenberg. |
+| IA | `evaluarCompletitud()`: las reglas dan el puntaje; Claude (`ANTHROPIC_MODEL`, por defecto `claude-opus-5-5`) agrega inconsistencias y la redacción de cada NC. En caché por contenido del expediente; si falla, quedan las reglas. Nunca dictamina. |
+| Avisos | `cita.programada`, `inspeccion.en_revision` y `dictamen.emitido` se envían a `N8N_WEBHOOK_URL` después de responder. |
+
+**Cambios de esquema:** nueva migración en `supabase/migrations/`, luego `pnpm db:reset` y `pnpm db:types`. Toda función nueva expuesta debe revocar `EXECUTE` a `public`/`anon` (Postgres lo concede por defecto) y toda tabla nueva necesita RLS.
+
+**Producción:** `supabase link` + `supabase db push` aplica las migraciones; crea las cuentas reales en Auth y su fila en `usuarios` (con `MODO_DEMO` apagado el login no lista cuentas). En Auth → URL Configuration pon el dominio real.
 
 ## Pendientes conocidos
 
 - Mapa real: definir `NEXT_PUBLIC_MAPBOX_TOKEN`. Sin token se muestra un croquis.
+- Alta de usuarios desde Configuración (hoy: Supabase Auth + fila en `usuarios`).
+- Plantilla del acta en Word (`/api/acta`), cuando el cliente entregue su formato.
+- Listados sin paginar (PostgREST corta en 1000 filas).
+- Next avisa en desarrollo de datos sin caché fuera de `<Suspense>` en varias páginas (ya pasaba con los datos en memoria).
 - Branding real (logo, colores) de UV Energía: se edita en Configuración → Branding.
 - Checklist NOM-002 resumido (25 reactivos, numerales internos R-xx): validarlo con el cliente.
 - Formato oficial de acta y dictamen: pedirlo antes de la reunión.

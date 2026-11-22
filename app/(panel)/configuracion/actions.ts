@@ -5,7 +5,8 @@ import { z } from "zod"
 import { requirePermiso } from "@/lib/auth"
 import { ejecutar } from "@/lib/action-result"
 import { updateBranding } from "@/lib/data/catalogos"
-import { resetStore } from "@/lib/data/store"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { sembrar } from "@/db/sembrar"
 
 const brandingSchema = z.object({
   nombreCorto: z.string().trim().min(2, "Nombre corto requerido"),
@@ -17,17 +18,22 @@ const brandingSchema = z.object({
 
 export async function guardarBranding(input: z.input<typeof brandingSchema>) {
   return ejecutar(async () => {
-    const s = await requirePermiso("configuracion.editar")
-    await updateBranding(brandingSchema.parse(input), s.usuario.id)
+    await requirePermiso("configuracion.editar")
+    await updateBranding(brandingSchema.parse(input))
     revalidatePath("/", "layout")
   }, "Branding actualizado")
 }
 
-/** Solo demo: vuelve a los datos seed (útil entre ensayos). */
+/**
+ * Solo demo (MODO_DEMO=true): vuelve a los datos seed entre ensayos. Borra los
+ * datos operativos del tenant —incluida la bitácora— y restablece las cuentas.
+ */
 export async function reiniciarDemo() {
   return ejecutar(async () => {
     await requirePermiso("configuracion.editar")
-    resetStore()
+    const password = process.env.SEED_PASSWORD
+    if (process.env.MODO_DEMO !== "true" || !password) throw new Error("El reinicio solo está disponible en modo demo")
+    await sembrar(createAdminClient(), { password })
     revalidatePath("/", "layout")
   }, "Datos de demo reiniciados")
 }

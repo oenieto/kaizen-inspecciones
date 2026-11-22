@@ -23,7 +23,7 @@ export default async function ConfiguracionPage() {
   return (
     <>
       <PageHeader title="Configuración" description={`Rama: ${rama.nombre}. Normas, checklists y plantillas son configuración, no código.`}>
-        <ReiniciarDemo />
+        {process.env.MODO_DEMO === "true" && <ReiniciarDemo />}
       </PageHeader>
       <Tabs defaultValue="normas">
         <TabsList>

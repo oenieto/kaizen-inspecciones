@@ -1,68 +1,65 @@
 import "server-only"
-import type { EstatusInspeccion } from "@/lib/types"
-import { store } from "./store"
+import { createClient } from "@/lib/supabase/server"
+import { medianocheLocal, partesLocales, rangoDelDia } from "@/lib/fechas"
+import type { EstatusInspeccion, Instalacion } from "@/lib/types"
+import { datos } from "./base"
+import { listChecklists } from "./catalogos"
+import { mapInstalacion, type Fila } from "./mappers"
 
-const MES = new Intl.DateTimeFormat("es-MX", { month: "short" })
+const MES = new Intl.DateTimeFormat("es-MX", { month: "short", timeZone: "UTC" })
+const ESTATUS: EstatusInspeccion[] = ["programada", "en_curso", "en_revision", "dictaminada", "cancelada"]
+
+/** Lo que devuelve la función SQL dashboard() (agregados calculados en la BD con RLS). */
+interface Agregados {
+  porEstatus: Partial<Record<EstatusInspeccion, number>>
+  meses: { mes: string; cumple: number; noCumple: number }[]
+  productividad: { inspector: string; dictaminadas: number; pendientes: number }[]
+  promedioHoras: number
+  ncFrecuentes: { reactivoId: string; total: number }[]
+  vencimientos: (Fila<"instalaciones"> & { cliente: string })[]
+  citasHoy: number
+  totalClientes: number
+}
 
 export async function getDashboard() {
-  const s = await store()
+  const supabase = await createClient()
   const ahora = new Date()
+  const hoy = partesLocales(ahora)
+  const { inicio, fin } = rangoDelDia(ahora)
 
-  const porEstatus = (["programada", "en_curso", "en_revision", "dictaminada", "cancelada"] as EstatusInspeccion[]).map(
-    (estatus) => ({ estatus, total: s.inspecciones.filter((x) => x.estatus === estatus).length }),
-  )
-
+  // Últimos 6 meses calendario (zona de la operación)
   const meses = Array.from({ length: 6 }, (_, k) => {
-    const d = new Date(ahora.getFullYear(), ahora.getMonth() - 5 + k, 1)
-    const fin = new Date(d.getFullYear(), d.getMonth() + 1, 1)
-    const delMes = s.dictamenes.filter((x) => x.emitidoEn >= d.toISOString() && x.emitidoEn < fin.toISOString())
-    return {
-      mes: MES.format(d).replace(".", ""),
-      cumple: delMes.filter((x) => x.resultado === "cumple").length,
-      noCumple: delMes.filter((x) => x.resultado === "no_cumple").length,
-    }
+    const d = new Date(Date.UTC(hoy.anio, hoy.mes - 1 - 5 + k, 15))
+    return { clave: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`, etiqueta: MES.format(d).replace(".", "") }
   })
+  const desde = medianocheLocal(hoy.anio, hoy.mes - 5, 1)
 
-  const productividad = s.usuarios
-    .filter((u) => u.rol === "inspector")
-    .map((u) => ({
-      inspector: u.nombre,
-      dictaminadas: s.inspecciones.filter((x) => x.inspectorId === u.id && x.estatus === "dictaminada").length,
-      pendientes: s.inspecciones.filter((x) => x.inspectorId === u.id && ["programada", "en_curso", "en_revision"].includes(x.estatus)).length,
-    }))
+  const [agregados, checklists] = await Promise.all([
+    supabase.rpc("dashboard", {
+      p_desde: desde.toISOString(),
+      p_hoy_inicio: inicio.toISOString(),
+      p_hoy_fin: fin.toISOString(),
+      p_limite_vencimiento: new Date(ahora.getTime() + 60 * 86_400_000).toISOString(),
+    }),
+    listChecklists(),
+  ])
+  const a = datos(agregados) as unknown as Agregados
+  const reactivos = new Map(checklists.flatMap((c) => c.reactivos.map((r) => [r.id, r])))
 
-  // Horas de visita → emisión del dictamen
-  const tiempos = s.dictamenes
-    .map((d) => {
-      const x = s.inspecciones.find((i) => i.id === d.inspeccionId)!
-      return (new Date(d.emitidoEn).getTime() - new Date(x.fecha).getTime()) / 3_600_000
-    })
-    .filter((h) => h > 0)
-  const promedioHoras = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : 0
-
-  const checklist = s.checklists[0]
-  const conteoNC = new Map<string, number>()
-  for (const x of s.inspecciones)
-    for (const r of x.respuestas) if (r.valor === "no_cumple") conteoNC.set(r.reactivoId, (conteoNC.get(r.reactivoId) ?? 0) + 1)
-  const ncFrecuentes = [...conteoNC.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([id, total]) => {
-      const r = checklist.reactivos.find((x) => x.id === id)!
-      return { numeral: r.numeral, texto: r.texto, total }
-    })
-
-  const limite = new Date(ahora.getTime() + 60 * 86_400_000).toISOString()
-  const vencimientos = s.instalaciones
-    .filter((i) => i.vencimiento && i.vencimiento <= limite)
-    .sort((a, b) => a.vencimiento!.localeCompare(b.vencimiento!))
-    .slice(0, 8)
-    .map((i) => ({ ...i, cliente: s.clientes.find((c) => c.id === i.clienteId)!.razonSocial }))
-
-  const hoy = new Date(ahora)
-  hoy.setHours(0, 0, 0, 0)
-  const manana = new Date(hoy.getTime() + 86_400_000)
-  const citasHoy = s.inspecciones.filter((x) => x.fecha >= hoy.toISOString() && x.fecha < manana.toISOString() && x.estatus !== "cancelada").length
-
-  return { porEstatus, meses, productividad, promedioHoras, ncFrecuentes, vencimientos, citasHoy, totalClientes: s.clientes.length }
+  return {
+    porEstatus: ESTATUS.map((estatus) => ({ estatus, total: a.porEstatus[estatus] ?? 0 })),
+    meses: meses.map(({ clave, etiqueta }) => {
+      const m = a.meses.find((x) => x.mes === clave)
+      return { mes: etiqueta, cumple: m?.cumple ?? 0, noCumple: m?.noCumple ?? 0 }
+    }),
+    productividad: a.productividad,
+    promedioHoras: Number(a.promedioHoras),
+    ncFrecuentes: a.ncFrecuentes.flatMap(({ reactivoId, total }) => {
+      const r = reactivos.get(reactivoId)
+      return r ? [{ numeral: r.numeral, texto: r.texto, total }] : []
+    }),
+    vencimientos: a.vencimientos.map(({ cliente, ...i }): Instalacion & { cliente: string } => ({ ...mapInstalacion(i), cliente })),
+    citasHoy: a.citasHoy,
+    totalClientes: a.totalClientes,
+  }
 }
