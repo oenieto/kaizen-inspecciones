@@ -1,3 +1,7 @@
 allowBuilds:
   sharp: false
   unrs-resolver: false
+overrides:
+  # GHSA-g3hv-75wg-m249: shadcn@4.23 -> ts-morph@26 -> @ts-morph/common@0.27 trae minimatch@10.
+  # @ts-morph/common@0.29 ya usa ^11; quitar este override cuando shadcn actualice ts-morph.
+  "@ts-morph/common>minimatch": "^11.0.1"
