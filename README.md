@@ -30,6 +30,58 @@ Configuración → «Reiniciar datos de demo» (solo con `MODO_DEMO=true`) vuelv
 
 Opcionales: `ANTHROPIC_API_KEY` (revisión con IA; sin ella el semáforo usa solo reglas), `GOTENBERG_URL` (PDF del dictamen: `docker run --rm -p 3001:3000 gotenberg/gotenberg:8`), `N8N_WEBHOOK_URL` (avisos), `NEXT_PUBLIC_MAPBOX_TOKEN` (mapa real).
 
+## Deploy en Vercel
+
+Hace falta un proyecto de Supabase en la nube, además del de Vercel. Para cargar la base desde tu compu **no** necesitas Docker.
+
+### 1. Supabase (una sola vez)
+
+1. Crea un proyecto en [supabase.com](https://supabase.com). Elige la región más cercana a los usuarios (p. ej. `us-east-1`) y guarda la contraseña de la base.
+2. Desde la raíz del repo, aplica las migraciones (esquema, RLS, funciones y buckets de Storage):
+   ```bash
+   pnpm exec supabase login
+   pnpm exec supabase link --project-ref <ref-del-proyecto>
+   pnpm exec supabase db push
+   ```
+3. Carga los datos de demo. En `.env.local` pon la URL y las llaves del proyecto en la nube (Project Settings → API) y una `SEED_PASSWORD` (mínimo 8 caracteres). Luego corre:
+   ```bash
+   pnpm seed
+   ```
+4. En Authentication → URL Configuration, pon la URL de Vercel como **Site URL**. El login es con contraseña, así que no se necesitan redirects.
+
+### 2. Vercel
+
+1. Importa `oenieto/kaizen-inspecciones`. Vercel detecta Next.js solo; no hay que cambiar los comandos de build.
+2. En Settings → Environment Variables, agrega las variables para Production (y Preview si se usa):
+
+   | Variable | Valor |
+   |---|---|
+   | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto de Supabase |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Publishable / anon key |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Secret / service_role key (solo servidor: **nunca** con prefijo `NEXT_PUBLIC_`) |
+   | `SEED_PASSWORD` | La misma que usaste en `pnpm seed` |
+   | `TENANT_SLUG` | `uv-energia` |
+   | `MODO_DEMO` | `true` para la demo (muestra las cuentas en el login y habilita «Reiniciar datos de demo») |
+   | `ENABLE_EXPERIMENTAL_COREPACK` | `1`, para que Vercel use pnpm 12 (`packageManager` de `package.json`) |
+   | `ANTHROPIC_API_KEY` | Opcional: revisión de completitud con IA |
+   | `NEXT_PUBLIC_MAPBOX_TOKEN` | Opcional: mapa real de la ruta del día |
+   | `GOTENBERG_URL` | Opcional: PDF del dictamen (ver abajo) |
+   | `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET` | Opcional: avisos a n8n |
+
+3. En Settings → Functions, pon la región de las funciones en la misma zona que Supabase (p. ej. `iad1` para `us-east-1`). Si quedan lejos, cada pantalla tarda más.
+4. La versión de Node (24.x) ya viene fijada en `package.json`.
+5. Despliega. Las variables `NEXT_PUBLIC_*` se incrustan al compilar: si cambias una, vuelve a desplegar.
+
+### 3. Comprobar
+
+- Entra a `/login` y prueba cada cuenta de demo.
+- Sigue el guion de abajo de punta a punta. El QR del dictamen debe abrir `https://<tu-dominio>/verificar/...`.
+- Desde el celular: abre la URL e instala la PWA (Agregar a pantalla de inicio). La cámara y la instalación necesitan HTTPS, que Vercel ya da.
+
+### PDF del dictamen
+
+Vercel no puede correr Gotenberg. Sin `GOTENBERG_URL`, el dictamen se descarga en **Word** y el botón de PDF responde que no está configurado. Para tener PDF, despliega la imagen `gotenberg/gotenberg:8` en un servicio de contenedores (Render, Railway, Fly.io o Cloud Run) y pon su URL en `GOTENBERG_URL`.
+
 ## Guion que ya funciona de punta a punta
 
 1. **Coordinación** agenda una cita (`/agenda` → *Nueva cita*), o arrastra una existente para reprogramarla.
