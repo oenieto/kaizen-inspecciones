@@ -5,6 +5,7 @@ import { z } from "zod"
 import { requirePermiso } from "@/lib/auth"
 import { ejecutar } from "@/lib/action-result"
 import { getInspeccionDetalle, sincronizarCaptura } from "@/lib/data/inspecciones"
+import { MAX_FOTOS } from "@/lib/offline/captura"
 
 const dataUrlImagen = z.string().regex(/^data:image\/(png|jpeg|webp);base64,/, "Imagen inválida").max(3_000_000, "Imagen demasiado grande")
 
@@ -31,7 +32,7 @@ const capturaSchema = z.object({
         hash: z.string().max(100),
       }),
     )
-    .max(20),
+    .max(MAX_FOTOS, `Máximo ${MAX_FOTOS} fotos por inspección`),
   firmaCliente: dataUrlImagen.nullable(),
   firmaInspector: dataUrlImagen.nullable(),
   nombreFirmaCliente: z.string().max(200),
