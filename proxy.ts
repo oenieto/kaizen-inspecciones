@@ -1,12 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server"
+import { actualizarSesion } from "@/lib/supabase/proxy"
 
-const SESSION_COOKIE = "uv_demo_session"
+const PROTEGIDAS = ["/dashboard", "/agenda", "/clientes", "/inspecciones", "/dictamenes", "/configuracion", "/campo"]
 
-/** Revisión optimista: sin cookie de sesión no se entra al panel ni a campo. */
-export function proxy(request: NextRequest) {
-  if (!request.cookies.has(SESSION_COOKIE)) {
+/** Refresca la sesión de Supabase; sin usuario no se entra al panel ni a campo. */
+export async function proxy(request: NextRequest) {
+  const { response, usuarioId } = await actualizarSesion(request)
+  const ruta = request.nextUrl.pathname
+  if (!usuarioId && PROTEGIDAS.some((p) => ruta === p || ruta.startsWith(`${p}/`))) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
+  return response
 }
 
 export const config = {
@@ -18,5 +22,7 @@ export const config = {
     "/dictamenes/:path*",
     "/configuracion/:path*",
     "/campo/:path*",
+    "/api/:path*",
+    "/login",
   ],
 }

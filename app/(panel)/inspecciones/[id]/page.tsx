@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { CheckCircle2Icon, CircleAlertIcon, FileTextIcon, MapPinIcon, SparklesIcon } from "lucide-react"
@@ -11,11 +12,11 @@ import { EstatusBadge } from "@/components/estatus-badge"
 import { requireSession } from "@/lib/auth"
 import { getRamaActual, listUsuarios } from "@/lib/data/catalogos"
 import { getInspeccionDetalle } from "@/lib/data/inspecciones"
-import { evaluarCompletitud, sugerirRedaccionNC } from "@/lib/ia/completitud"
+import { evaluarCompletitud, evaluarReglas, sugerirRedaccionNC, type ResultadoCompletitud } from "@/lib/ia/completitud"
 import { fecha, fechaHora } from "@/lib/format"
 import { puede } from "@/lib/permisos"
 import { cn } from "@/lib/utils"
-import type { ValorCumple } from "@/lib/types"
+import type { InspeccionDetalle, Reactivo, ValorCumple } from "@/lib/types"
 import { AccionesExpediente } from "./acciones"
 
 export async function generateMetadata(props: PageProps<"/inspecciones/[id]">): Promise<Metadata> {
@@ -36,7 +37,7 @@ export default async function ExpedientePage(props: PageProps<"/inspecciones/[id
   const [{ usuario }, x, rama, usuarios] = await Promise.all([requireSession(), getInspeccionDetalle(id), getRamaActual(), listUsuarios()])
   if (!x) notFound()
 
-  const completitud = evaluarCompletitud(x)
+  const reglas = evaluarReglas(x)
   const respuestas = new Map(x.respuestas.map((r) => [r.reactivoId, r]))
   const secciones = [...new Set(x.checklist.reactivos.map((r) => r.seccion))]
   const nc = x.respuestas.filter((r) => r.valor === "no_cumple").length
@@ -54,7 +55,7 @@ export default async function ExpedientePage(props: PageProps<"/inspecciones/[id
           puedeAprobar={puede(usuario.rol, "dictamen.aprobar")}
           puedeRevisar={puede(usuario.rol, "inspecciones.revisar")}
           puedeAgenda={puede(usuario.rol, "agenda.editar")}
-          completitud={completitud.puntaje}
+          completitud={reglas.puntaje}
         />
       </PageHeader>
 
@@ -94,7 +95,12 @@ export default async function ExpedientePage(props: PageProps<"/inspecciones/[id
                                   {a?.valor === "no_cumple" && (
                                     <p className="flex gap-1.5 rounded-md bg-review-soft p-2.5 text-xs text-review">
                                       <SparklesIcon className="mt-0.5 size-3.5 shrink-0" />
-                                      <span><b>Redacción sugerida:</b> {sugerirRedaccionNC(r, a.observacion)}</span>
+                                      <span>
+                                        <b>Redacción sugerida:</b>{" "}
+                                        <Suspense fallback={sugerirRedaccionNC(r, a.observacion)}>
+                                          <RedaccionNC x={x} r={r} observacion={a.observacion} />
+                                        </Suspense>
+                                      </span>
                                     </p>
                                   )}
                                 </div>
@@ -191,26 +197,9 @@ export default async function ExpedientePage(props: PageProps<"/inspecciones/[id
         </Card>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><SparklesIcon className="size-4" /> Completitud del expediente</CardTitle>
-              <CardDescription>Revisión asistida por IA antes de dictaminar</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-3">
-                <span className={cn("text-2xl font-semibold tabular-nums", semaforo[completitud.nivel])}>{completitud.puntaje}%</span>
-                <Progress value={completitud.puntaje} className="flex-1" />
-              </div>
-              <ul className="space-y-1.5 text-sm">
-                {completitud.hallazgos.map((h) => (
-                  <li key={h.texto} className="flex gap-2">
-                    {h.ok ? <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-positive" /> : <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-warning" />}
-                    {h.texto}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          <Suspense fallback={<TarjetaCompletitud c={{ ...reglas, redacciones: {}, fuente: "reglas" }} analizando />}>
+            <CompletitudIA x={x} />
+          </Suspense>
 
           <Card>
             <CardHeader><CardTitle>Datos de la inspección</CardTitle></CardHeader>
@@ -250,5 +239,44 @@ export default async function ExpedientePage(props: PageProps<"/inspecciones/[id
         </div>
       </div>
     </>
+  )
+}
+
+async function CompletitudIA({ x }: { x: InspeccionDetalle }) {
+  return <TarjetaCompletitud c={await evaluarCompletitud(x)} />
+}
+
+async function RedaccionNC({ x, r, observacion }: { x: InspeccionDetalle; r: Reactivo; observacion?: string }) {
+  const { redacciones } = await evaluarCompletitud(x)
+  return redacciones[r.id] ?? sugerirRedaccionNC(r, observacion)
+}
+
+function TarjetaCompletitud({ c, analizando = false }: { c: ResultadoCompletitud; analizando?: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><SparklesIcon className="size-4" /> Completitud del expediente</CardTitle>
+        <CardDescription>
+          {analizando ? "Analizando con IA…" : c.fuente === "ia" ? "Revisión asistida por IA antes de dictaminar" : "Revisión automática antes de dictaminar"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3">
+          <span className={cn("text-2xl font-semibold tabular-nums", semaforo[c.nivel])}>{c.puntaje}%</span>
+          <Progress value={c.puntaje} className="flex-1" />
+        </div>
+        <ul className="space-y-1.5 text-sm">
+          {c.hallazgos.map((h) => (
+            <li key={h.texto} className="flex gap-2">
+              {h.ok ? <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-positive" /> : <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-warning" />}
+              <span>
+                {h.texto}
+                {h.ia && <Badge variant="outline" className="ml-1.5 align-middle text-[10px]">IA</Badge>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   )
 }

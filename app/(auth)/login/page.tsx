@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { Suspense } from "react"
-import { getTenant, listUsuarios } from "@/lib/data/catalogos"
+import { getTenant, listCuentasDemo } from "@/lib/data/catalogos"
 import { LoginForm } from "./login-form"
 
 export const metadata: Metadata = { title: "Iniciar sesión" }
@@ -14,7 +14,7 @@ export default function LoginPage() {
 }
 
 async function Login() {
-  const [tenant, usuarios] = await Promise.all([getTenant(), listUsuarios()])
+  const [tenant, cuentas] = await Promise.all([getTenant(), listCuentasDemo()])
   return (
     <main className="grid min-h-svh lg:grid-cols-[1.1fr_1fr]">
       <section className="hidden flex-col justify-between bg-black p-12 text-white lg:flex">
@@ -35,7 +35,8 @@ async function Login() {
       <section className="flex items-center justify-center bg-background p-6">
         <LoginForm
           tenantNombre={tenant.nombreCorto}
-          cuentas={usuarios.map((u) => ({ email: u.email, nombre: u.nombre, rol: u.rol }))}
+          cuentas={cuentas}
+          contrasenaDemo={cuentas.length ? process.env.SEED_PASSWORD : undefined}
         />
       </section>
     </main>

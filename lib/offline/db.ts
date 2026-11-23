@@ -15,6 +15,8 @@ export interface FotoLocal {
   lng: number | null
   tomadaEn: string
   hash: string
+  /** Ruta en Storage una vez subida (la cola no la vuelve a subir) */
+  ruta?: string
 }
 
 export interface CapturaLocal {

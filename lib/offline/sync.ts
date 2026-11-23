@@ -1,15 +1,44 @@
 "use client"
 
-import { sincronizarInspeccion } from "@/app/campo/actions"
+import { prepararSubidaFotos, sincronizarInspeccion } from "@/app/campo/actions"
+import type { ActionResult } from "@/lib/action-result"
+import { createClient } from "@/lib/supabase/client"
 import { capturasDb, type CapturaLocal } from "./db"
 import { estaEnLinea } from "./red"
 
-/** Envía una captura al servidor. Si sale bien la borra de IndexedDB. */
+/**
+ * Sube a Storage las fotos que aún no tienen ruta (URL firmada por foto) y
+ * guarda cada ruta en IndexedDB en cuanto sube, para que un corte de red a
+ * media cola no obligue a resubir lo ya enviado.
+ */
+async function subirFotos(c: CapturaLocal): Promise<ActionResult<CapturaLocal>> {
+  const pendientes = c.fotos.filter((f) => !f.ruta)
+  if (!pendientes.length) return { ok: true, data: c }
+  const r = await prepararSubidaFotos(c.inspeccionId, pendientes.map((f) => f.id))
+  if (!r.ok) return r
+  const storage = createClient().storage.from("evidencias")
+  let fotos = c.fotos
+  for (const { id, ruta, token } of r.data!) {
+    if (token) {
+      const foto = c.fotos.find((f) => f.id === id)!
+      const blob = await (await fetch(foto.dataUrl)).blob()
+      const { error } = await storage.uploadToSignedUrl(ruta, token, blob, { contentType: "image/jpeg" })
+      if (error) return { ok: false, error: `No se pudo subir «${foto.nombre}»: ${error.message}` }
+    }
+    fotos = fotos.map((f) => (f.id === id ? { ...f, ruta } : f))
+    await capturasDb.update(c.inspeccionId, { fotos })
+  }
+  return { ok: true, data: { ...c, fotos } }
+}
+
+/** Envía una captura al servidor. Si sale bien y es final, la borra de IndexedDB. */
 export async function enviarCaptura(c: CapturaLocal, finalizar: boolean) {
+  const subida = await subirFotos(c)
+  if (!subida.ok) return subida
   const r = await sincronizarInspeccion(c.inspeccionId, {
     respuestas: c.respuestas,
     observaciones: c.observaciones,
-    fotos: c.fotos.map(({ nombre, dataUrl, lat, lng, tomadaEn, hash }) => ({ nombre, dataUrl, lat, lng, tomadaEn, hash })),
+    fotos: subida.data!.fotos.map(({ nombre, ruta, lat, lng, tomadaEn, hash }) => ({ nombre, ruta: ruta!, lat, lng, tomadaEn, hash })),
     firmaCliente: c.firmaCliente,
     firmaInspector: c.firmaInspector,
     nombreFirmaCliente: c.nombreFirmaCliente,

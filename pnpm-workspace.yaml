@@ -1,7 +1,13 @@
 allowBuilds:
+  esbuild: true
   sharp: false
+  supabase: true
   unrs-resolver: false
 overrides:
   # GHSA-g3hv-75wg-m249: shadcn@4.23 -> ts-morph@26 -> @ts-morph/common@0.27 trae minimatch@10.
   # @ts-morph/common@0.29 ya usa ^11; quitar este override cuando shadcn actualice ts-morph.
   "@ts-morph/common>minimatch": "^11.0.1"
+  # docxtemplater-image-module-free@1.1.1 (última versión) depende de xmldom@0.1, abandonado y con
+  # vulnerabilidades sin parche (1 crítica, 11 altas). @xmldom/xmldom es su sucesor mantenido y
+  # conserva la API que usa el módulo (DOMParser).
+  "docxtemplater-image-module-free>xmldom": "npm:@xmldom/xmldom@^0.8.11"

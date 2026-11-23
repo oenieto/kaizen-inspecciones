@@ -1,4 +1,5 @@
 import { getRama } from "@/config/ramas"
+import { medianocheLocal, partesLocales } from "@/lib/fechas"
 import type {
   Acta,
   Checklist,
@@ -21,7 +22,7 @@ import type {
  * Determinista (PRNG con semilla) pero relativo a la fecha de arranque, para
  * que la agenda siempre tenga citas en la semana actual.
  *
- * Antonio: este mismo contenido es el que debe insertar `pnpm seed` en Supabase.
+ * `pnpm seed` (db/sembrar.ts) inserta este mismo contenido en Supabase.
  */
 
 export interface DemoStore {
@@ -72,11 +73,16 @@ const OBSERVACIONES_GENERALES = [
 
 const HOMOCLAVE = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"
 
+/** Hora local de la operación (no la del servidor, que en la nube suele ser UTC). */
 function atHour(base: Date, dayOffset: number, hour: number, minute = 0) {
-  const d = new Date(base)
-  d.setDate(d.getDate() + dayOffset)
-  d.setHours(hour, minute, 0, 0)
-  return d
+  const p = partesLocales(base)
+  return new Date(medianocheLocal(p.anio, p.mes, p.dia + dayOffset).getTime() + (hour * 60 + minute) * 60_000)
+}
+
+/** Día de la semana (0 = domingo) en la zona de la operación */
+function diaSemana(d: Date) {
+  const p = partesLocales(d)
+  return new Date(Date.UTC(p.anio, p.mes - 1, p.dia)).getUTCDay()
 }
 
 export function createSeed(now = new Date()): DemoStore {
@@ -142,7 +148,7 @@ export function createSeed(now = new Date()): DemoStore {
 
   const plantillas: Plantilla[] = [
     { id: "p_acta", tenantId, tipo: "acta", nombre: "Acta circunstanciada de verificación", archivo: "templates/acta.docx", campos: ["folio_inspeccion", "cliente", "instalacion", "direccion", "fecha", "inspector", "respuestas", "observaciones", "firma_cliente", "firma_inspector"], actualizadaEn: now.toISOString() },
-    { id: "p_dict", tenantId, tipo: "dictamen", nombre: "Dictamen de verificación", archivo: "templates/dictamen.docx", campos: ["folio", "cliente", "rfc", "instalacion", "direccion", "norma", "resultado", "no_conformidades", "responsable", "fecha_emision", "vigencia", "qr"], actualizadaEn: now.toISOString() },
+    { id: "p_dict", tenantId, tipo: "dictamen", nombre: "Dictamen de verificación", archivo: "templates/dictamen.docx", campos: ["unidad", "acreditacion", "ciudad", "folio", "norma", "norma_titulo", "cliente", "rfc", "instalacion", "permiso", "direccion", "fecha_visita", "inspector", "fecha_emision", "fecha_aprobacion", "resultado", "leyenda", "vigencia", "no_conformidades", "responsable", "url_verificacion", "qr"], actualizadaEn: now.toISOString() },
   ]
 
   const nombresClientes: [string, string][] = [
@@ -243,13 +249,12 @@ export function createSeed(now = new Date()): DemoStore {
     evidencias.push({ id: id(), inspeccionId, tipo: "documento", nombre: "Memoria técnica.pdf", url: "/demo/memoria-tecnica.svg", lat: null, lng: null, tomadaEn: fecha.toISOString(), hash: sha256() })
   }
 
-  const base = new Date(now)
-  base.setHours(0, 0, 0, 0)
+  const base = atHour(now, 0, 0)
 
   // Historial: 6 meses de inspecciones dictaminadas
   for (let d = 180; d >= 3; d -= 1 + Math.floor(rand() * 4)) {
     const fecha = atHour(base, -d, 8 + Math.floor(rand() * 8))
-    if (fecha.getDay() === 0 || fecha.getDay() === 6) continue
+    if (diaSemana(fecha) === 0 || diaSemana(fecha) === 6) continue
     const inst = pick(instalaciones)
     const insp = pick(inspectores)
     const conNC = rand() < 0.3
@@ -279,11 +284,11 @@ export function createSeed(now = new Date()): DemoStore {
   }
 
   // Semana actual y siguiente: citas operativas
-  const dow = (base.getDay() + 6) % 7 // lunes = 0
+  const dow = (diaSemana(base) + 6) % 7 // lunes = 0
   for (let day = -dow; day < 12 - dow; day++) {
     const fechaDia = atHour(base, day, 0)
     // Fines de semana sin citas, salvo hoy (para que la demo siempre tenga ruta del día)
-    if (day !== 0 && (fechaDia.getDay() === 0 || fechaDia.getDay() === 6)) continue
+    if (day !== 0 && (diaSemana(fechaDia) === 0 || diaSemana(fechaDia) === 6)) continue
     inspectores.forEach((insp, k) => {
       const citas = 1 + Math.floor(rand() * 2)
       for (let c = 0; c < citas; c++) {

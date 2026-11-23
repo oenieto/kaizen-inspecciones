@@ -1,52 +1,79 @@
 import "server-only"
+import { createClient } from "@/lib/supabase/server"
 import type { Cliente, Instalacion } from "@/lib/types"
-import { newId, store } from "./store"
-import { registrar } from "./bitacora"
-import { toFila } from "./inspecciones"
+import { datos, esUuid, patronBusqueda } from "./base"
+import { mapCliente, mapFila, mapInstalacion, type Fila } from "./mappers"
 
 export async function listClientes(q?: string) {
-  const s = await store()
-  const term = q?.trim().toLowerCase()
-  return s.clientes
-    .filter((c) => !term || c.razonSocial.toLowerCase().includes(term) || c.rfc.toLowerCase().includes(term))
+  const supabase = await createClient()
+  let consulta = supabase.from("clientes_resumen").select("*")
+  if (q?.trim()) consulta = consulta.ilike("busqueda", patronBusqueda(q))
+  return datos(await consulta)
     .map((c) => ({
-      ...c,
-      instalaciones: s.instalaciones.filter((i) => i.clienteId === c.id).length,
-      inspecciones: s.inspecciones.filter((x) => s.instalaciones.some((i) => i.id === x.instalacionId && i.clienteId === c.id)).length,
+      ...mapCliente(c as Fila<"clientes">),
+      instalaciones: c.instalaciones ?? 0,
+      inspecciones: c.inspecciones ?? 0,
     }))
-    .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial))
+    .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
 }
 
 export async function listInstalaciones() {
-  const s = await store()
-  return s.instalaciones.map((i) => ({ ...i, cliente: s.clientes.find((c) => c.id === i.clienteId)!.razonSocial }))
+  const supabase = await createClient()
+  return datos(await supabase.from("instalaciones").select("*, cliente:clientes(razon_social)"))
+    .map(({ cliente, ...i }) => ({ ...mapInstalacion(i), cliente: cliente.razon_social }))
+    .sort((a, b) => a.cliente.localeCompare(b.cliente, "es") || a.nombre.localeCompare(b.nombre, "es"))
 }
 
 export async function getClienteDetalle(id: string) {
-  const s = await store()
-  const cliente = s.clientes.find((c) => c.id === id)
-  if (!cliente) return null
-  const instalaciones = s.instalaciones.filter((i) => i.clienteId === id)
-  const ids = new Set(instalaciones.map((i) => i.id))
-  const historial = s.inspecciones
-    .filter((x) => ids.has(x.instalacionId))
-    .sort((a, b) => b.fecha.localeCompare(a.fecha))
-    .map(toFila)
-  return { cliente, instalaciones, historial }
+  if (!esUuid(id)) return null
+  const supabase = await createClient()
+  const [cliente, instalaciones, historial] = await Promise.all([
+    supabase.from("clientes").select("*").eq("id", id).maybeSingle(),
+    supabase.from("instalaciones").select("*").eq("cliente_id", id).order("nombre"),
+    supabase.from("inspecciones_fila").select("*").eq("cliente_id", id).order("fecha", { ascending: false }),
+  ])
+  const c = datos(cliente)
+  if (!c) return null
+  return { cliente: mapCliente(c), instalaciones: datos(instalaciones).map(mapInstalacion), historial: datos(historial).map(mapFila) }
 }
 
-export async function createCliente(data: Omit<Cliente, "id" | "tenantId" | "creadoEn">, usuarioId: string) {
-  const s = await store()
-  const cliente: Cliente = { ...data, id: newId("c"), tenantId: s.tenant.id, creadoEn: new Date().toISOString() }
-  s.clientes.push(cliente)
-  registrar({ entidad: "cliente", entidadId: cliente.id, accion: "crear", descripcion: `Alta de cliente ${cliente.razonSocial}`, usuarioId })
-  return cliente
+export async function createCliente(data: Omit<Cliente, "id" | "tenantId" | "creadoEn">) {
+  const supabase = await createClient()
+  const c = datos(
+    await supabase
+      .from("clientes")
+      .insert({
+        rfc: data.rfc,
+        razon_social: data.razonSocial,
+        giro: data.giro,
+        contacto: data.contacto,
+        telefono: data.telefono,
+        email: data.email,
+      })
+      .select()
+      .single(),
+  )
+  return mapCliente(c)
 }
 
-export async function createInstalacion(data: Omit<Instalacion, "id" | "tenantId">, usuarioId: string) {
-  const s = await store()
-  const inst: Instalacion = { ...data, id: newId("i"), tenantId: s.tenant.id }
-  s.instalaciones.push(inst)
-  registrar({ entidad: "instalacion", entidadId: inst.id, accion: "crear", descripcion: `Alta de instalación ${inst.nombre}`, usuarioId })
-  return inst
+export async function createInstalacion(data: Omit<Instalacion, "id" | "tenantId">) {
+  const supabase = await createClient()
+  const i = datos(
+    await supabase
+      .from("instalaciones")
+      .insert({
+        cliente_id: data.clienteId,
+        nombre: data.nombre,
+        tipo: data.tipo,
+        direccion: data.direccion,
+        municipio: data.municipio,
+        lat: data.lat,
+        lng: data.lng,
+        permiso: data.permiso,
+        vencimiento: data.vencimiento,
+      })
+      .select()
+      .single(),
+  )
+  return mapInstalacion(i)
 }

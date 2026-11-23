@@ -17,8 +17,8 @@ const clienteSchema = z.object({
 
 export async function crearCliente(input: z.input<typeof clienteSchema>) {
   return ejecutar(async () => {
-    const s = await requirePermiso("clientes.editar")
-    const c = await createCliente(clienteSchema.parse(input), s.usuario.id)
+    await requirePermiso("clientes.editar")
+    const c = await createCliente(clienteSchema.parse(input))
     revalidatePath("/clientes")
     return c.id
   }, "Cliente creado")
@@ -37,9 +37,9 @@ const instalacionSchema = z.object({
 
 export async function crearInstalacion(input: z.input<typeof instalacionSchema>) {
   return ejecutar(async () => {
-    const s = await requirePermiso("clientes.editar")
+    await requirePermiso("clientes.editar")
     const data = instalacionSchema.parse(input)
-    await createInstalacion({ ...data, vencimiento: null }, s.usuario.id)
+    await createInstalacion({ ...data, vencimiento: null })
     revalidatePath(`/clientes/${data.clienteId}`)
   }, "Instalación agregada")
 }
