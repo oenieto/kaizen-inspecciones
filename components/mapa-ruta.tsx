@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import "mapbox-gl/dist/mapbox-gl.css"
 
 export interface Parada {
   id: string
@@ -28,7 +27,9 @@ function MapaMapbox({ paradas, token, className }: { paradas: Parada[]; token: s
     if (!ref.current) return
     let map: import("mapbox-gl").Map | undefined
     let cancelado = false
-    import("mapbox-gl").then(({ default: mapboxgl }) => {
+    // El CSS se carga junto con la librería: importarlo arriba lo precargaba en
+    // cada página aunque sin token nunca se usa (aviso en consola).
+    Promise.all([import("mapbox-gl"), import("mapbox-gl/dist/mapbox-gl.css")]).then(([{ default: mapboxgl }]) => {
       if (cancelado || !ref.current) return
       mapboxgl.accessToken = token
       map = new mapboxgl.Map({ container: ref.current, style: "mapbox://styles/mapbox/streets-v12", center: [-100.39, 20.62], zoom: 10 })

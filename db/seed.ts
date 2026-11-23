@@ -55,6 +55,23 @@ function prng(seed: number) {
 
 const DAY = 86_400_000
 
+/** Texto de la no conformidad según el reactivo incumplido (lo que verá el cliente en el dictamen). */
+const OBSERVACION_NC: Record<string, string> = {
+  r10: "Corrosión superficial en tramo visible junto al regulador; aplicar limpieza y recubrimiento anticorrosivo.",
+  r12: "Tramo de tubería sin identificación de color ni leyenda «GAS NATURAL»; identificar en toda su trayectoria.",
+  r19: "Recinto de calentadores sin rejilla de ventilación inferior; la ventilación es insuficiente para los aparatos instalados.",
+  r21: "Falta señalización de la válvula de corte general y de «No fumar» en la zona de medidor.",
+}
+
+const OBSERVACIONES_GENERALES = [
+  "Instalación en condiciones generales aceptables.",
+  "Trayectoria conforme al isométrico; se recomienda mantenimiento preventivo del regulador.",
+  "Instalación ordenada y accesible; bitácora al corriente.",
+  "Sin fugas detectadas; se sugiere renovar señalización desgastada en el próximo mantenimiento.",
+]
+
+const HOMOCLAVE = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"
+
 function atHour(base: Date, dayOffset: number, hour: number, minute = 0) {
   const d = new Date(base)
   d.setDate(d.getDate() + dayOffset)
@@ -65,6 +82,16 @@ function atHour(base: Date, dayOffset: number, hour: number, minute = 0) {
 export function createSeed(now = new Date()): DemoStore {
   const rand = prng(20200127)
   const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)]
+  // Segundo PRNG solo para detalles (mediciones, RFC, hashes): así `rand` conserva
+  // su secuencia y la agenda, clientes e inspecciones de la demo no cambian.
+  const varia = prng(20261122)
+  const entre = (min: number, max: number) => Math.round((min + varia() * (max - min)) * 10) / 10
+  const sha256 = () => `sha256:${Array.from({ length: 8 }, () => Math.floor(varia() * 2 ** 32).toString(16).padStart(8, "0")).join("")}`
+  const rfcMoral = () => {
+    const fecha = new Date(Date.UTC(1988 + Math.floor(varia() * 30), Math.floor(varia() * 12), 1 + Math.floor(varia() * 28)))
+    const homoclave = Array.from({ length: 3 }, () => HOMOCLAVE[Math.floor(varia() * HOMOCLAVE.length)]).join("")
+    return `DEM${fecha.toISOString().slice(2, 10).replaceAll("-", "")}${homoclave}`
+  }
   const rama = getRama("gas-natural")
   const tenantId = "t_uv"
 
@@ -137,7 +164,7 @@ export function createSeed(now = new Date()): DemoStore {
   const clientes: Cliente[] = nombresClientes.map(([razonSocial, giro], i) => ({
     id: `c_${i + 1}`,
     tenantId,
-    rfc: `DEM${String(200101 + i * 37).padStart(6, "0")}${"ABCDEFGHJK"[i % 10]}${i % 9}${"XYZ"[i % 3]}`,
+    rfc: rfcMoral(),
     razonSocial,
     giro,
     contacto: contactos[i],
@@ -190,20 +217,31 @@ export function createSeed(now = new Date()): DemoStore {
   const respuestasCompletas = (conNC: boolean): RespuestaChecklist[] =>
     checklist.reactivos.map((r) => {
       if (r.tipo === "medicion") {
-        const medicion = r.unidad === "min" ? 15 : r.id === "r13" ? 10.5 : 2.3
+        // Operación en baja presión, prueba de hermeticidad y su duración
+        const medicion = r.unidad === "min" ? [15, 20, 30][Math.floor(varia() * 3)] : r.id === "r13" ? entre(9.8, 11.5) : entre(1.9, 2.7)
         return { reactivoId: r.id, valor: "cumple", medicion }
       }
-      if (r.tipo === "texto") return { reactivoId: r.id, valor: null, observacion: "Instalación en condiciones generales aceptables." }
-      const nc = conNC && ["r10", "r12", "r19", "r21"].includes(r.id) && rand() < 0.6
+      if (r.tipo === "texto") return { reactivoId: r.id, valor: null, observacion: OBSERVACIONES_GENERALES[Math.floor(varia() * OBSERVACIONES_GENERALES.length)] }
+      const nc = conNC && r.id in OBSERVACION_NC && rand() < 0.6
       return {
         reactivoId: r.id,
         valor: nc ? "no_cumple" : !r.requerido && rand() < 0.3 ? "na" : "cumple",
-        observacion: nc ? "Se observa incumplimiento; requiere corrección." : undefined,
+        observacion: nc ? OBSERVACION_NC[r.id] : undefined,
       }
     })
 
   const log = (e: Omit<EntradaBitacora, "id" | "tenantId">) =>
     bitacora.push({ id: nid("b"), tenantId, ...e })
+
+  const contactoDe = (inst: Instalacion) => clientes.find((c) => c.id === inst.clienteId)?.contacto ?? "Representante del cliente"
+
+  // Foto del medidor y memoria técnica. Los id del historial van en su propia serie
+  // para no recorrer `seq` (y con él los id de inspecciones y dictámenes).
+  let evHistorial = 0
+  const agregarEvidencias = (inspeccionId: string, inst: Instalacion, fecha: Date, id: () => string) => {
+    evidencias.push({ id: id(), inspeccionId, tipo: "foto", nombre: "Medidor y regulador.jpg", url: "/demo/evidencia-medidor.svg", lat: inst.lat, lng: inst.lng, tomadaEn: fecha.toISOString(), hash: sha256() })
+    evidencias.push({ id: id(), inspeccionId, tipo: "documento", nombre: "Memoria técnica.pdf", url: "/demo/memoria-tecnica.svg", lat: null, lng: null, tomadaEn: fecha.toISOString(), hash: sha256() })
+  }
 
   const base = new Date(now)
   base.setHours(0, 0, 0, 0)
@@ -225,7 +263,8 @@ export function createSeed(now = new Date()): DemoStore {
       iniciadaEn: fecha.toISOString(), sincronizadaEn: new Date(fecha.getTime() + 3 * 3600_000).toISOString(),
       enviadaRevisionEn: new Date(fecha.getTime() + 4 * 3600_000).toISOString(),
     })
-    actas.push({ id: nid("a"), inspeccionId: id, version: 1, firmaCliente: null, firmaInspector: null, nombreFirmaCliente: "Representante del cliente", generadaEn: fecha.toISOString() })
+    actas.push({ id: nid("a"), inspeccionId: id, version: 1, firmaCliente: null, firmaInspector: null, nombreFirmaCliente: contactoDe(inst), generadaEn: fecha.toISOString() })
+    agregarEvidencias(id, inst, fecha, () => `ev_h${++evHistorial}`)
     const year = emitido.getFullYear()
     folios[year] = (folios[year] ?? 0) + 1
     const resultado = respuestas.some((r) => r.valor === "no_cumple") ? "no_cumple" : "cumple"
@@ -266,9 +305,8 @@ export function createSeed(now = new Date()): DemoStore {
         log({ entidad: "inspeccion", entidadId: id, accion: "crear", descripcion: "Cita programada", usuarioId: "u_coord", timestamp: new Date(fecha.getTime() - 5 * DAY).toISOString() })
         if (estatus === "en_revision") {
           log({ entidad: "inspeccion", entidadId: id, accion: "sincronizar", descripcion: "Checklist y evidencias sincronizados desde campo", usuarioId: insp.id, timestamp: new Date(fecha.getTime() + 3 * 3600_000).toISOString() })
-          evidencias.push({ id: nid("ev"), inspeccionId: id, tipo: "foto", nombre: "Medidor y regulador.jpg", url: "/demo/evidencia-medidor.svg", lat: inst.lat, lng: inst.lng, tomadaEn: fecha.toISOString(), hash: `sha256:${seq.toString(16)}a9f` })
-          evidencias.push({ id: nid("ev"), inspeccionId: id, tipo: "documento", nombre: "Memoria técnica.pdf", url: "/demo/memoria-tecnica.svg", lat: null, lng: null, tomadaEn: fecha.toISOString(), hash: `sha256:${seq.toString(16)}c31` })
-          actas.push({ id: nid("a"), inspeccionId: id, version: 1, firmaCliente: null, firmaInspector: null, nombreFirmaCliente: "Representante del cliente", generadaEn: fecha.toISOString() })
+          agregarEvidencias(id, inst, fecha, () => nid("ev"))
+          actas.push({ id: nid("a"), inspeccionId: id, version: 1, firmaCliente: null, firmaInspector: null, nombreFirmaCliente: contactoDe(inst), generadaEn: fecha.toISOString() })
         }
       }
     })
