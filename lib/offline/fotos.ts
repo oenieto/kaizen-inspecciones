@@ -1,5 +1,6 @@
 "use client"
 
+import { hashEvidencia } from "./captura"
 import type { FotoLocal } from "./db"
 
 /** Reduce la foto a ≤1280 px en JPEG para que quepa en IndexedDB y en la sincronización. */
@@ -24,14 +25,14 @@ function ubicacion(): Promise<{ lat: number; lng: number } | null> {
   )
 }
 
-async function sha256(texto: string) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto))
-  return `sha256:${[...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32)}`
-}
-
-/** Foto de evidencia con fecha/hora, geolocalización (si el permiso lo da) y hash de integridad. */
+/**
+ * Foto de evidencia con fecha/hora, geolocalización (si el permiso lo da) y
+ * hash SHA-256 de los bytes JPEG exactos que se subirán a Storage; el servidor
+ * lo recalcula al sincronizar.
+ */
 export async function prepararFoto(file: File): Promise<FotoLocal> {
   const [dataUrl, geo] = await Promise.all([comprimir(file), ubicacion()])
+  const bytes = await (await fetch(dataUrl)).arrayBuffer()
   return {
     id: crypto.randomUUID(),
     nombre: file.name || "foto.jpg",
@@ -39,6 +40,6 @@ export async function prepararFoto(file: File): Promise<FotoLocal> {
     lat: geo?.lat ?? null,
     lng: geo?.lng ?? null,
     tomadaEn: new Date().toISOString(),
-    hash: await sha256(dataUrl),
+    hash: await hashEvidencia(bytes),
   }
 }

@@ -6,7 +6,7 @@ import { requirePermiso } from "@/lib/auth"
 import { ejecutar } from "@/lib/action-result"
 import { getInspeccionDetalle, sincronizarCaptura } from "@/lib/data/inspecciones"
 import { notificar } from "@/lib/notificaciones"
-import { MAX_FOTOS } from "@/lib/offline/captura"
+import { HASH_EVIDENCIA, MAX_FOTOS, hashEvidencia } from "@/lib/offline/captura"
 import { createClient } from "@/lib/supabase/server"
 
 const uuid = z.uuid("Identificador inválido")
@@ -73,9 +73,30 @@ const capturaSchema = z.object({
   firmaInspector: dataUrlFirma.nullable(),
   nombreFirmaCliente: z.string().max(200),
   finalizar: z.boolean(),
+  envioId: uuid.optional(),
 })
 
 export type CapturaPayload = z.input<typeof capturaSchema>
+
+/**
+ * Recalcula el SHA-256 de cada foto sobre el objeto guardado en Storage. Si la
+ * PWA mandó un hash completo y no coincide, el archivo se alteró o se corrompió
+ * en el camino: se rechaza. Lo que se registra es siempre el hash del servidor,
+ * así que el expediente coincide con el binario resguardado (capturas hechas
+ * antes de este cambio traen un hash recortado y solo se reemplaza).
+ */
+async function hashesVerificados(fotos: z.infer<typeof capturaSchema>["fotos"]) {
+  const storage = (await createClient()).storage.from("evidencias")
+  return Promise.all(
+    fotos.map(async (f) => {
+      const { data, error } = await storage.download(f.ruta)
+      if (error || !data) throw new Error(`La evidencia «${f.nombre}» no se ha subido`)
+      const hash = await hashEvidencia(await data.arrayBuffer())
+      if (HASH_EVIDENCIA.test(f.hash) && f.hash !== hash) throw new Error(`La evidencia «${f.nombre}» no coincide con su hash: vuelve a tomar la foto`)
+      return hash
+    }),
+  )
+}
 
 /** Paso 2: registra la captura con las rutas ya subidas (transacción en la BD). */
 export async function sincronizarInspeccion(inspeccionId: string, payload: CapturaPayload) {
@@ -84,16 +105,18 @@ export async function sincronizarInspeccion(inspeccionId: string, payload: Captu
     const c = capturaSchema.parse(payload)
     const prefijo = `${s.tenant.id}/${x.id}/`
     if (c.fotos.some((f) => !f.ruta.startsWith(prefijo))) throw new Error("Evidencia de otra inspección")
+    const hashes = await hashesVerificados(c.fotos)
     const r = await sincronizarCaptura(x.id, {
       respuestas: c.respuestas,
       observaciones: c.observaciones,
-      evidencias: c.fotos.map((f) => ({ tipo: "foto", nombre: f.nombre, ruta: f.ruta, lat: f.lat, lng: f.lng, tomadaEn: f.tomadaEn, hash: f.hash })),
+      evidencias: c.fotos.map((f, i) => ({ tipo: "foto", nombre: f.nombre, ruta: f.ruta, lat: f.lat, lng: f.lng, tomadaEn: f.tomadaEn, hash: hashes[i] })),
       firmaCliente: c.firmaCliente,
       firmaInspector: c.firmaInspector,
       nombreFirmaCliente: c.nombreFirmaCliente || null,
       finalizar: c.finalizar,
+      envioId: c.envioId,
     })
-    if (c.finalizar) notificar("inspeccion.en_revision", { tenant: s.tenant.slug, inspeccionId: x.id, inspectorId: x.inspectorId })
+    if (c.finalizar && !r.repetido) notificar("inspeccion.en_revision", { tenant: s.tenant.slug, inspeccionId: x.id, inspectorId: x.inspectorId })
     revalidatePath("/campo")
     revalidatePath(`/inspecciones/${x.id}`)
     return r
