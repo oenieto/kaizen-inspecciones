@@ -30,6 +30,12 @@ export interface CapturaLocal {
   /** borrador: se sigue editando · pendiente: finalizada, espera señal */
   estado: "borrador" | "pendiente"
   actualizadaEn: string
+  /**
+   * Llave de idempotencia del envío final (UUID). Se fija antes del primer
+   * intento y se reutiliza en cada reintento: si el servidor ya aplicó el envío
+   * pero la respuesta se perdió, devuelve el mismo resultado en vez de un error.
+   */
+  envioId?: string
 }
 
 const db = new Dexie("uv-campo") as Dexie & { capturas: EntityTable<CapturaLocal, "inspeccionId"> }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import type { RespuestaChecklist } from "../types.ts"
 import type { FotoLocal } from "./db.ts"
-import { MAX_FOTOS, agregarFotos, aplicarRespuesta, porcentajeAvance } from "./captura.ts"
+import { HASH_EVIDENCIA, MAX_FOTOS, agregarFotos, aplicarRespuesta, hashEvidencia, porcentajeAvance } from "./captura.ts"
 
 /**
  * Lógica pura de la captura de campo (PWA). Corre sin dependencias:
@@ -73,6 +73,21 @@ describe("agregarFotos", () => {
     const actuales = [foto("a")]
     agregarFotos(actuales, [foto("b")])
     assert.deepEqual(actuales.map((f) => f.id), ["a"])
+  })
+})
+
+describe("hashEvidencia", () => {
+  test("es el SHA-256 completo de los bytes", async () => {
+    // Vector conocido: SHA-256("abc")
+    const h = await hashEvidencia(new TextEncoder().encode("abc"))
+    assert.equal(h, "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert.match(h, HASH_EVIDENCIA)
+  })
+
+  test("cambia si cambia un solo byte", async () => {
+    const a = await hashEvidencia(new Uint8Array([0xff, 0xd8, 0x00]))
+    const b = await hashEvidencia(new Uint8Array([0xff, 0xd8, 0x01]))
+    assert.notEqual(a, b)
   })
 })
 

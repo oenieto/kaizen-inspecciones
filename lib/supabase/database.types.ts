@@ -39,14 +39,14 @@ isOneToOne: false
                   ]
                 },"bitacora": {
                   Row: {
-                    "accion": Database["public"]['Enums']["accion_bitacora"],"descripcion": string,"entidad": string,"entidad_id": string,"id": string,"tenant_id": string,"timestamp": string,"usuario_id": string | null
+                    "accion": Database["public"]['Enums']["accion_bitacora"],"antes": Json | null,"descripcion": string,"despues": Json | null,"entidad": string,"entidad_id": string,"id": string,"ip": unknown | null,"nivel": string,"tenant_id": string,"timestamp": string,"usuario_id": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "accion": Database["public"]['Enums']["accion_bitacora"],"descripcion": string,"entidad": string,"entidad_id": string,"id"?: string,"tenant_id": string,"timestamp"?: string,"usuario_id"?: string | null
+                    "accion": Database["public"]['Enums']["accion_bitacora"],"antes"?: Json | null,"descripcion": string,"despues"?: Json | null,"entidad": string,"entidad_id": string,"id"?: string,"ip"?: unknown | null,"nivel"?: string,"tenant_id": string,"timestamp"?: string,"usuario_id"?: string | null
                   }
                   Update: {
-                    "accion"?: Database["public"]['Enums']["accion_bitacora"],"descripcion"?: string,"entidad"?: string,"entidad_id"?: string,"id"?: string,"tenant_id"?: string,"timestamp"?: string,"usuario_id"?: string | null
+                    "accion"?: Database["public"]['Enums']["accion_bitacora"],"antes"?: Json | null,"descripcion"?: string,"despues"?: Json | null,"entidad"?: string,"entidad_id"?: string,"id"?: string,"ip"?: unknown | null,"nivel"?: string,"tenant_id"?: string,"timestamp"?: string,"usuario_id"?: string | null
                   }
                   Relationships: [
                     {
@@ -489,7 +489,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "accion_bitacora": "crear"|"actualizar"|"cambiar_estatus"|"sincronizar"|"aprobar"|"emitir_dictamen"|"subir_evidencia","estatus_inspeccion": "programada"|"en_curso"|"en_revision"|"dictaminada"|"cancelada","resultado_dictamen": "cumple"|"no_cumple","rol": "admin"|"coordinador"|"inspector"|"responsable","tipo_evidencia": "foto"|"documento","tipo_plantilla": "acta"|"dictamen"
+            "accion_bitacora": "crear"|"actualizar"|"cambiar_estatus"|"sincronizar"|"aprobar"|"emitir_dictamen"|"subir_evidencia"|"eliminar","estatus_inspeccion": "programada"|"en_curso"|"en_revision"|"dictaminada"|"cancelada","resultado_dictamen": "cumple"|"no_cumple","rol": "admin"|"coordinador"|"inspector"|"responsable","tipo_evidencia": "foto"|"documento","tipo_plantilla": "acta"|"dictamen"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -605,7 +605,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "accion_bitacora": ["crear", "actualizar", "cambiar_estatus", "sincronizar", "aprobar", "emitir_dictamen", "subir_evidencia"],"estatus_inspeccion": ["programada", "en_curso", "en_revision", "dictaminada", "cancelada"],"resultado_dictamen": ["cumple", "no_cumple"],"rol": ["admin", "coordinador", "inspector", "responsable"],"tipo_evidencia": ["foto", "documento"],"tipo_plantilla": ["acta", "dictamen"]
+            "accion_bitacora": ["crear", "actualizar", "cambiar_estatus", "sincronizar", "aprobar", "emitir_dictamen", "subir_evidencia", "eliminar"],"estatus_inspeccion": ["programada", "en_curso", "en_revision", "dictaminada", "cancelada"],"resultado_dictamen": ["cumple", "no_cumple"],"rol": ["admin", "coordinador", "inspector", "responsable"],"tipo_evidencia": ["foto", "documento"],"tipo_plantilla": ["acta", "dictamen"]
           }
         }
 } as const
