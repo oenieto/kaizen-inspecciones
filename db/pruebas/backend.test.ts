@@ -194,6 +194,32 @@ describe("campo → revisión → dictamen", () => {
     assert.equal(r.error?.message, "La inspección ya no admite captura de campo")
   })
 
+  test("reintento del envío final con la misma llave: mismo resultado, sin duplicar", async () => {
+    const { data } = await insp.from("inspecciones").select("id").eq("estatus", "programada").limit(1).single()
+    const envioId = crypto.randomUUID()
+    const captura = { respuestas: [], observaciones: "Reintento", finalizar: true, envioId }
+    const primero = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: captura })
+    assert.ifError(primero.error)
+    assert.deepEqual(primero.data, { estatus: "en_revision", evidenciasNuevas: 0 })
+    // La respuesta «se perdió»: la PWA reintenta con la misma llave
+    const segundo = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: captura })
+    assert.ifError(segundo.error)
+    assert.deepEqual(segundo.data, { estatus: "en_revision", evidenciasNuevas: 0, repetido: true })
+    const b = await resp.from("bitacora").select("accion").eq("entidad_id", data!.id).eq("accion", "sincronizar")
+    assert.equal(b.data!.length, 1)
+    // Una llave nueva sí respeta la regla de estatus
+    const otra = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: { ...captura, envioId: crypto.randomUUID() } })
+    assert.equal(otra.error?.message, "La inspección ya no admite captura de campo")
+  })
+
+  test("una llave de envío no sirve para otra inspección", async () => {
+    const { data } = await insp.from("inspecciones").select("id").eq("estatus", "programada").limit(2)
+    const envioId = crypto.randomUUID()
+    assert.ifError((await insp.rpc("sincronizar_captura", { p_id: data![0].id, p_captura: { respuestas: [], finalizar: false, envioId } })).error)
+    const r = await insp.rpc("sincronizar_captura", { p_id: data![1].id, p_captura: { respuestas: [], finalizar: false, envioId } })
+    assert.equal(r.error?.message, "Llave de envío inválida")
+  })
+
   test("rechaza evidencias que no están en Storage", async () => {
     const { data } = await insp.from("inspecciones").select("id, tenant_id").eq("estatus", "programada").limit(1).single()
     const r = await insp.rpc("sincronizar_captura", {

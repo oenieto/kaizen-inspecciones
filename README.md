@@ -146,10 +146,22 @@ Las firmas de `lib/data/*` siguen siendo el contrato con las pantallas; por dent
 | Folio | `aprobar_y_emitir` bloquea la fila `(tenant, año)` de `folios`: aprobaciones simultáneas se serializan y una transacción fallida no consume consecutivo. |
 | Bitácora | Solo la escriben triggers y funciones (`auth.uid()` como autor). Un trigger rechaza UPDATE/DELETE/TRUNCATE en `bitacora` y `dictamenes`. |
 | Auth | Supabase Auth con correo y contraseña (registro público deshabilitado). `proxy.ts` refresca el token y protege rutas; `getSession()` conserva su forma. |
-| Evidencias | Bucket privado `evidencias/{tenant}/{inspección}/{foto}.jpg`. La PWA pide URLs firmadas de subida (`prepararSubidaFotos`), sube directo desde el dispositivo y la acción recibe rutas; la BD verifica que el objeto exista. Las pantallas reciben URLs firmadas de 1 h. |
+| Evidencias | Bucket privado `evidencias/{tenant}/{inspección}/{foto}.jpg`. La PWA pide URLs firmadas de subida (`prepararSubidaFotos`), sube directo desde el dispositivo y la acción recibe rutas; la BD verifica que el objeto exista. Hash SHA-256 de los bytes JPEG: la PWA lo calcula al tomar la foto y el servidor lo recalcula sobre el objeto en Storage (si no coincide, rechaza). Las pantallas reciben URLs firmadas de 1 h. |
 | Dictamen | `/api/dictamen/[id]` llena la plantilla del bucket `plantillas/{tenant}/dictamen.docx` (o `templates/dictamen.docx`) con docxtemplater; etiquetas en `Plantilla.campos`. PDF con Gotenberg. |
 | IA | `evaluarCompletitud()`: las reglas dan el puntaje; Claude (`ANTHROPIC_MODEL`, por defecto `claude-opus-5-5`) agrega inconsistencias y la redacción de cada NC. En caché por contenido del expediente; si falla, quedan las reglas. Nunca dictamina. |
 | Avisos | `cita.programada`, `inspeccion.en_revision` y `dictamen.emitido` se envían a `N8N_WEBHOOK_URL` después de responder. |
+
+### Contrato de sincronización (PWA → servidor)
+
+1. La PWA guarda la captura en IndexedDB (`lib/offline/db.ts`). Fotos con id UUID del cliente, GPS, hora y hash.
+2. Al finalizar, la captura queda `pendiente` y recibe una llave `envioId` (UUID) que se persiste **antes** del primer intento.
+3. `prepararSubidaFotos` da URLs firmadas solo para las fotos que aún no están en Storage; la PWA las sube y guarda cada `ruta` en cuanto sube.
+4. `sincronizarInspeccion` valida con zod, recalcula los hashes y llama `sincronizar_captura` (una transacción). La llave y su resultado se guardan en `sincronizaciones`: si la respuesta se pierde y la PWA reintenta, el servidor devuelve el mismo resultado con `repetido: true`, sin duplicar bitácora ni avisos.
+5. Con respuesta correcta, la PWA borra la captura local.
+
+Las evidencias son idempotentes por `ruta` (única) y las fotos por su UUID.
+
+**Conflictos.** En la demo hay un inspector por inspección y la captura se bloquea al finalizar, así que no hay conflictos. En productivo (dos dispositivos sobre la misma inspección): concurrencia optimista con `inspecciones.version`. La PWA manda la versión que descargó y solo los reactivos que cambió; si la versión no coincide, el servidor fusiona por reactivo y, cuando ambos cambiaron el mismo, rechaza ese reactivo y la PWA pide al inspector elegir. Las fotos nunca chocan (UUID del cliente, solo se agregan). Cada fusión queda en bitácora con antes/después.
 
 **Cambios de esquema:** nueva migración en `supabase/migrations/`, luego `pnpm db:reset` y `pnpm db:types`. Toda función nueva expuesta debe revocar `EXECUTE` a `public`/`anon` (Postgres lo concede por defecto) y toda tabla nueva necesita RLS.
 

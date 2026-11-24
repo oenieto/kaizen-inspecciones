@@ -165,13 +165,16 @@ export interface CapturaCampo {
   firmaInspector: string | null
   nombreFirmaCliente: string | null
   finalizar: boolean
+  /** Llave de idempotencia (UUID del cliente). Un envío ya aplicado devuelve su resultado original. */
+  envioId?: string
 }
 
 /** Recibe lo capturado offline en la PWA (una transacción en sincronizar_captura). Con `finalizar` pasa a revisión. */
 export async function sincronizarCaptura(id: string, c: CapturaCampo) {
   const supabase = await createClient()
   const r = datos(await supabase.rpc("sincronizar_captura", { p_id: id, p_captura: c as unknown as Json }))
-  return r as { estatus: EstatusInspeccion; evidenciasNuevas: number }
+  /** `repetido`: el envío ya se había aplicado (reintento tras perder la respuesta) */
+  return r as { estatus: EstatusInspeccion; evidenciasNuevas: number; repetido?: boolean }
 }
 
 export async function devolverACampo(id: string, motivo: string) {
