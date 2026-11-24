@@ -155,9 +155,11 @@ describe("agenda", () => {
     const { data: x } = await coord.from("inspecciones").select("id, fecha").eq("estatus", "programada").limit(1).single()
     const nueva = new Date(new Date(x!.fecha).getTime() + 86_400_000).toISOString()
     assert.ifError((await coord.rpc("reprogramar_inspeccion", { p_id: x!.id, p_fecha: nueva })).error)
-    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", x!.id).order("timestamp", { ascending: false }).limit(2)
+    // Por tipo, no por orden: el seed fecha «Cita programada» 5 días antes de la cita (puede quedar en el futuro)
+    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", x!.id).eq("accion", "actualizar")
     const evento = b!.find((e) => e.nivel === "evento")!
     const detalle = b!.find((e) => e.nivel === "detalle")!
+    assert.equal(b!.length, 2)
     assert.match(evento.descripcion, /^Reprogramada a /)
     assert.equal(detalle.accion, "actualizar")
     assert.deepEqual(Object.keys(detalle.despues as object), ["fecha"])
