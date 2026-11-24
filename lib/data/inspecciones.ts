@@ -87,7 +87,7 @@ export const getInspeccionDetalle = cache(async (id: string): Promise<Inspeccion
       .eq("id", id)
       .order("tomada_en", { referencedTable: "evidencias" })
       .maybeSingle(),
-    supabase.from("bitacora").select("*").eq("entidad_id", id).order("timestamp", { ascending: false }),
+    supabase.from("bitacora").select("*").eq("entidad_id", id).eq("nivel", "evento").order("timestamp", { ascending: false }),
   ])
   const x = datos(fila)
   if (!x) return null
@@ -165,13 +165,16 @@ export interface CapturaCampo {
   firmaInspector: string | null
   nombreFirmaCliente: string | null
   finalizar: boolean
+  /** Llave de idempotencia (UUID del cliente). Un envío ya aplicado devuelve su resultado original. */
+  envioId?: string
 }
 
 /** Recibe lo capturado offline en la PWA (una transacción en sincronizar_captura). Con `finalizar` pasa a revisión. */
 export async function sincronizarCaptura(id: string, c: CapturaCampo) {
   const supabase = await createClient()
   const r = datos(await supabase.rpc("sincronizar_captura", { p_id: id, p_captura: c as unknown as Json }))
-  return r as { estatus: EstatusInspeccion; evidenciasNuevas: number }
+  /** `repetido`: el envío ya se había aplicado (reintento tras perder la respuesta) */
+  return r as { estatus: EstatusInspeccion; evidenciasNuevas: number; repetido?: boolean }
 }
 
 export async function devolverACampo(id: string, motivo: string) {
@@ -183,7 +186,18 @@ export async function devolverACampo(id: string, motivo: string) {
  * Aprobación del responsable técnico: función SQL transaccional que asigna el
  * folio consecutivo sin huecos (bloqueo de la fila de folios) y emite el dictamen.
  */
-export async function aprobarYEmitir(id: string) {
+export async function aprobarYEmitir(id: string, revisionIa?: RevisionIA) {
   const supabase = await createClient()
-  return mapDictamen(datos(await supabase.rpc("aprobar_y_emitir", { p_id: id })))
+  return mapDictamen(
+    datos(await supabase.rpc("aprobar_y_emitir", { p_id: id, p_revision_ia: revisionIa as unknown as Json | undefined })),
+  )
+}
+
+/** Lo que el semáforo de completitud mostraba al aprobar (queda en bitácora con quién aprobó). */
+export interface RevisionIA {
+  nivel: "verde" | "amarillo" | "rojo"
+  puntaje: number
+  fuente: "ia" | "reglas"
+  alertas: string[]
+  redacciones: Record<string, string>
 }

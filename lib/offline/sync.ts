@@ -31,11 +31,20 @@ async function subirFotos(c: CapturaLocal): Promise<ActionResult<CapturaLocal>> 
   return { ok: true, data: { ...c, fotos } }
 }
 
-/** Envía una captura al servidor. Si sale bien y es final, la borra de IndexedDB. */
+/**
+ * Envía una captura al servidor. Si sale bien y es final, la borra de IndexedDB.
+ * El envío final lleva una llave de idempotencia guardada en IndexedDB antes del
+ * primer intento: un reintento tras perder la respuesta no falla ni duplica.
+ */
 export async function enviarCaptura(c: CapturaLocal, finalizar: boolean) {
+  if (finalizar && !c.envioId) {
+    c = { ...c, envioId: crypto.randomUUID() }
+    await capturasDb.update(c.inspeccionId, { envioId: c.envioId })
+  }
   const subida = await subirFotos(c)
   if (!subida.ok) return subida
   const r = await sincronizarInspeccion(c.inspeccionId, {
+    envioId: finalizar ? c.envioId : undefined,
     respuestas: c.respuestas,
     observaciones: c.observaciones,
     fotos: subida.data!.fotos.map(({ nombre, ruta, lat, lng, tomadaEn, hash }) => ({ nombre, ruta: ruta!, lat, lng, tomadaEn, hash })),

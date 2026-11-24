@@ -111,10 +111,21 @@ describe("aislamiento y permisos (RLS)", () => {
     assert.equal(coordUpd.data?.length ?? 0, 0)
     const folio = await adminUv.from("tenants").update({ serie_folio: "HACK" }).eq("id", tenantUv)
     assert.equal(folio.error?.code, "42501")
-    const ok = await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv).select().single()
+    const ok = await adminUv.from("tenants").update({ nombre_corto: "UV Energía Demo" }).eq("id", tenantUv).select().single()
     assert.ifError(ok.error)
-    const b = await adminUv.from("bitacora").select("descripcion").eq("entidad_id", tenantUv)
-    assert.ok(b.data!.some((x) => x.descripcion === "Branding actualizado"))
+    assert.ifError((await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv)).error)
+    const b = await adminUv.from("bitacora").select("descripcion, nivel, antes, despues").eq("entidad_id", tenantUv).order("timestamp")
+    const cambio = b.data!.find((x) => x.descripcion === "Branding actualizado")!
+    assert.equal(cambio.nivel, "evento")
+    // Solo los campos que cambiaron
+    assert.deepEqual(cambio.antes, { nombre_corto: "UV Energía" })
+    assert.deepEqual(cambio.despues, { nombre_corto: "UV Energía Demo" })
+  })
+
+  test("un UPDATE sin cambios no ensucia la bitácora", async () => {
+    const antes = (await adminUv.from("bitacora").select("id").eq("entidad_id", tenantUv)).data!.length
+    assert.ifError((await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv)).error)
+    assert.equal((await adminUv.from("bitacora").select("id").eq("entidad_id", tenantUv)).data!.length, antes)
   })
 
   test("el coordinador no aprueba dictámenes", async () => {
@@ -138,6 +149,21 @@ describe("agenda", () => {
     assert.equal(b.data!.usuario_id, yo.user!.id)
     const dup = await coord.from("clientes").insert({ rfc: "PRU010101AB1", razon_social: "Dup", giro: "Hotel", contacto: "a", telefono: "1234567", email: "a@b.mx" })
     assert.equal(dup.error?.code, "23505")
+  })
+
+  test("reprogramar: un evento con nombre y el detalle con antes/después", async () => {
+    const { data: x } = await coord.from("inspecciones").select("id, fecha").eq("estatus", "programada").limit(1).single()
+    const nueva = new Date(new Date(x!.fecha).getTime() + 86_400_000).toISOString()
+    assert.ifError((await coord.rpc("reprogramar_inspeccion", { p_id: x!.id, p_fecha: nueva })).error)
+    // Por tipo, no por orden: el seed fecha «Cita programada» 5 días antes de la cita (puede quedar en el futuro)
+    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", x!.id).eq("accion", "actualizar")
+    const evento = b!.find((e) => e.nivel === "evento")!
+    const detalle = b!.find((e) => e.nivel === "detalle")!
+    assert.equal(b!.length, 2)
+    assert.match(evento.descripcion, /^Reprogramada a /)
+    assert.equal(detalle.accion, "actualizar")
+    assert.deepEqual(Object.keys(detalle.despues as object), ["fecha"])
+    assert.equal(new Date((detalle.antes as { fecha: string }).fecha).getTime(), new Date(x!.fecha).getTime())
   })
 
   test("solo se reprograman citas programadas", async () => {
@@ -194,6 +220,32 @@ describe("campo → revisión → dictamen", () => {
     assert.equal(r.error?.message, "La inspección ya no admite captura de campo")
   })
 
+  test("reintento del envío final con la misma llave: mismo resultado, sin duplicar", async () => {
+    const { data } = await insp.from("inspecciones").select("id").eq("estatus", "programada").limit(1).single()
+    const envioId = crypto.randomUUID()
+    const captura = { respuestas: [], observaciones: "Reintento", finalizar: true, envioId }
+    const primero = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: captura })
+    assert.ifError(primero.error)
+    assert.deepEqual(primero.data, { estatus: "en_revision", evidenciasNuevas: 0 })
+    // La respuesta «se perdió»: la PWA reintenta con la misma llave
+    const segundo = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: captura })
+    assert.ifError(segundo.error)
+    assert.deepEqual(segundo.data, { estatus: "en_revision", evidenciasNuevas: 0, repetido: true })
+    const b = await resp.from("bitacora").select("accion").eq("entidad_id", data!.id).eq("accion", "sincronizar")
+    assert.equal(b.data!.length, 1)
+    // Una llave nueva sí respeta la regla de estatus
+    const otra = await insp.rpc("sincronizar_captura", { p_id: data!.id, p_captura: { ...captura, envioId: crypto.randomUUID() } })
+    assert.equal(otra.error?.message, "La inspección ya no admite captura de campo")
+  })
+
+  test("una llave de envío no sirve para otra inspección", async () => {
+    const { data } = await insp.from("inspecciones").select("id").eq("estatus", "programada").limit(2)
+    const envioId = crypto.randomUUID()
+    assert.ifError((await insp.rpc("sincronizar_captura", { p_id: data![0].id, p_captura: { respuestas: [], finalizar: false, envioId } })).error)
+    const r = await insp.rpc("sincronizar_captura", { p_id: data![1].id, p_captura: { respuestas: [], finalizar: false, envioId } })
+    assert.equal(r.error?.message, "Llave de envío inválida")
+  })
+
   test("rechaza evidencias que no están en Storage", async () => {
     const { data } = await insp.from("inspecciones").select("id, tenant_id").eq("estatus", "programada").limit(1).single()
     const r = await insp.rpc("sincronizar_captura", {
@@ -228,8 +280,16 @@ describe("campo → revisión → dictamen", () => {
     const otraVez = await resp.rpc("aprobar_y_emitir", { p_id: inspeccionId })
     assert.equal(otraVez.error?.message, "Solo se aprueban inspecciones en revisión")
 
-    const b = await resp.from("bitacora").select("accion").eq("entidad_id", inspeccionId)
+    const b = await resp.from("bitacora").select("accion").eq("entidad_id", inspeccionId).eq("nivel", "evento")
     assert.deepEqual(new Set(b.data!.map((x) => x.accion)), new Set(["crear", "sincronizar", "aprobar", "emitir_dictamen"]))
+    // El acta guarda las firmas como hash, no la imagen
+    const { data: acta } = await resp.from("actas").select("id").eq("inspeccion_id", inspeccionId).single()
+    const { data: cambiosActa } = await resp.from("bitacora").select("despues").eq("entidad_id", acta!.id)
+    assert.ok(cambiosActa!.length > 0)
+    for (const c of cambiosActa!) {
+      const firma = (c.despues as { firma_cliente?: string }).firma_cliente
+      if (firma) assert.match(firma, /^sha256:[0-9a-f]{64}$/)
+    }
 
     const publico = createClient<Database>(url, anon, opciones)
     const v = await publico.rpc("verificar_dictamen", { p_token: nuestro.token_qr })
@@ -237,6 +297,81 @@ describe("campo → revisión → dictamen", () => {
     assert.equal((v.data as { folio: string }).folio, nuestro.folio)
     assert.ok(!("rfc" in (v.data as object)))
     assert.equal((await publico.rpc("verificar_dictamen", { p_token: "no-existe" })).data, null)
+  })
+})
+
+describe("IA: límite por tenant y trazabilidad de sugerencias", () => {
+  const sugerencia = { nombre: "Planta El Marqués", tipo: "Industrial", direccion: "Av. de la Montaña 112", municipio: "El Marqués", permiso: null, permisoVigencia: "2027-03-31" }
+
+  async function solicitudOk(tenant: string, usuario: string) {
+    const r = await admin.rpc("ia_reservar", { p_tenant: tenant, p_usuario: usuario, p_funcion: "ocr_permiso" })
+    assert.ifError(r.error)
+    assert.ifError(
+      (await admin.rpc("ia_completar", { p_id: r.data, p_modelo: "claude-opus-5-5", p_tokens_entrada: 1200, p_tokens_salida: 300, p_sugerencia: sugerencia })).error,
+    )
+    return r.data
+  }
+
+  test("un usuario no reserva ni registra llamadas al modelo", async () => {
+    const r = await coord.rpc("ia_reservar", { p_tenant: tenantUv, p_funcion: "ocr_permiso" })
+    assert.ok(r.error)
+  })
+
+  test("el límite mensual del tenant corta la siguiente llamada", async () => {
+    assert.ifError((await admin.from("tenants").update({ ia_limite_mensual: 1 }).eq("id", otroTenantId)).error)
+    assert.ifError((await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_funcion: "completitud" })).error)
+    const segunda = await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_funcion: "completitud" })
+    assert.equal(segunda.error?.message, "Se alcanzó el límite mensual de uso de IA (1 solicitudes)")
+  })
+
+  test("aceptada: la bitácora guarda lo sugerido, lo guardado y quién decidió", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const { data: inst } = await coord.from("instalaciones").select("id").limit(1).single()
+    // La IA no leyó el permiso (null): que la persona lo capture no cuenta como edición
+    const final = { ...sugerencia, permiso: "G/00123/DIS/2024" }
+    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_entidad: "instalacion", p_entidad_id: inst!.id, p_final: final })
+    assert.ifError(r.error)
+    assert.equal(r.data, "aceptada")
+
+    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", inst!.id).eq("accion", "decision_ia").single()
+    assert.equal(b!.usuario_id, yo.user!.id)
+    assert.deepEqual(b!.antes, sugerencia)
+    assert.deepEqual(b!.despues, final)
+    assert.match(b!.descripcion, /aceptada por /)
+    const { data: sug } = await coord.from("bitacora").select("accion").eq("entidad_id", id).single()
+    assert.equal(sug!.accion, "sugerencia_ia")
+
+    const otraVez = await coord.rpc("ia_resolver", { p_id: id, p_descartar: true })
+    assert.equal(otraVez.error?.message, "La sugerencia de IA ya se había resuelto")
+  })
+
+  test("editada: la persona cambió un dato que la IA sí propuso", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_final: { ...sugerencia, municipio: "Querétaro" } })
+    assert.equal(r.data, "editada")
+  })
+
+  test("el inspector no resuelve sugerencias y otro tenant no las ve", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const r = await insp.rpc("ia_resolver", { p_id: id, p_descartar: true })
+    assert.equal(r.error?.message, "No tienes permiso para esta acción")
+    const otro = await sesion(OTRO.email)
+    assert.equal((await otro.from("ia_solicitudes").select("id").eq("id", id)).data!.length, 0)
+    const ajena = await otro.rpc("ia_resolver", { p_id: id, p_descartar: true })
+    assert.equal(ajena.error?.message, "Sugerencia de IA no encontrada")
+  })
+
+  test("aprobar con la revisión de IA a la vista la deja en bitácora", async (t) => {
+    const { data } = await resp.from("inspecciones").select("id").eq("estatus", "en_revision").limit(1)
+    if (!data?.length) return t.skip("no quedan inspecciones en revisión en el seed")
+    const revision = { nivel: "amarillo", puntaje: 80, fuente: "ia", alertas: ["IA: R-07 medición poco plausible"], redacciones: {} }
+    assert.ifError((await resp.rpc("aprobar_y_emitir", { p_id: data[0].id, p_revision_ia: revision })).error)
+    const { data: b } = await resp.from("bitacora").select("*").eq("entidad_id", data[0].id).eq("accion", "decision_ia").single()
+    assert.deepEqual(b!.despues, revision)
+    assert.match(b!.descripcion, /semáforo amarillo, 1 alertas/)
   })
 })
 

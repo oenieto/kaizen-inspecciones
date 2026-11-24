@@ -24,6 +24,13 @@ export async function listInstalaciones() {
     .sort((a, b) => a.cliente.localeCompare(b.cliente, "es") || a.nombre.localeCompare(b.nombre, "es"))
 }
 
+/** RFC del cliente (para cotejarlo con el titular del permiso). null si no existe o no es visible. */
+export async function getRfcCliente(id: string) {
+  if (!esUuid(id)) return null
+  const supabase = await createClient()
+  return datos(await supabase.from("clientes").select("rfc").eq("id", id).maybeSingle())?.rfc ?? null
+}
+
 export async function getClienteDetalle(id: string) {
   if (!esUuid(id)) return null
   const supabase = await createClient()
@@ -70,6 +77,7 @@ export async function createInstalacion(data: Omit<Instalacion, "id" | "tenantId
         lat: data.lat,
         lng: data.lng,
         permiso: data.permiso,
+        permiso_vigencia: data.permisoVigencia ?? null,
         vencimiento: data.vencimiento,
       })
       .select()

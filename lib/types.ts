@@ -95,6 +95,8 @@ export interface Instalacion {
   lat: number
   lng: number
   permiso: string
+  /** Vigencia del permiso o constancia del cliente (YYYY-MM-DD), si se conoce */
+  permisoVigencia?: string | null
   /** Fecha en que vence su dictamen vigente (o null si nunca se ha dictaminado) */
   vencimiento: ISODate | null
 }
@@ -182,6 +184,17 @@ export type AccionBitacora =
   | "aprobar"
   | "emitir_dictamen"
   | "subir_evidencia"
+  | "eliminar"
+  /** Lo que propuso la IA (nunca decide) */
+  | "sugerencia_ia"
+  /** Una persona aceptó, editó o descartó lo que propuso la IA */
+  | "decision_ia"
+
+/**
+ * evento: lo que muestra la línea de tiempo del expediente.
+ * detalle: cambio de fila hecho dentro de una operación de flujo (solo auditoría).
+ */
+export type NivelBitacora = "evento" | "detalle"
 
 export interface EntradaBitacora {
   id: ID
@@ -192,6 +205,12 @@ export interface EntradaBitacora {
   descripcion: string
   usuarioId: ID
   timestamp: ISODate
+  nivel?: NivelBitacora
+  /** Valores anteriores de los campos que cambiaron (o la fila completa en una baja) */
+  antes?: Record<string, unknown> | null
+  /** Valores nuevos de los campos que cambiaron (o la fila completa en un alta) */
+  despues?: Record<string, unknown> | null
+  ip?: string | null
 }
 
 export interface Plantilla {

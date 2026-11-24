@@ -105,6 +105,7 @@ export const mapInstalacion = (i: Fila<"instalaciones">): Instalacion => ({
   lat: i.lat,
   lng: i.lng,
   permiso: i.permiso,
+  permisoVigencia: i.permiso_vigencia,
   vencimiento: isoONull(i.vencimiento),
 })
 
@@ -171,6 +172,10 @@ export const mapBitacora = (b: Fila<"bitacora">): EntradaBitacora => ({
   // Sin usuario = proceso del sistema (carga de datos)
   usuarioId: b.usuario_id ?? "sistema",
   timestamp: iso(b.timestamp),
+  nivel: b.nivel === "detalle" ? "detalle" : "evento",
+  antes: (b.antes as Record<string, unknown> | null) ?? null,
+  despues: (b.despues as Record<string, unknown> | null) ?? null,
+  ip: b.ip == null ? null : String(b.ip),
 })
 
 /** Las columnas de una vista salen como nullable en los tipos generados. */
