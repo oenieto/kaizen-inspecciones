@@ -1,5 +1,5 @@
 import "server-only"
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { connection } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import type { Database } from "./database.types"
@@ -12,9 +12,13 @@ import { supabaseEnv } from "./env"
  */
 export async function createClient() {
   await connection()
-  const cookieStore = await cookies()
+  const [cookieStore, h] = await Promise.all([cookies(), headers()])
   const { url, anonKey } = supabaseEnv()
+  // Las consultas salen de este servidor: sin esto la bitácora registraría la IP
+  // del servidor y no la del usuario (Vercel pone la del cliente en x-forwarded-for).
+  const ip = (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "").trim()
   return createServerClient<Database>(url, anonKey, {
+    global: ip ? { headers: { "x-cliente-ip": ip } } : undefined,
     cookies: {
       getAll: () => cookieStore.getAll(),
       setAll(cookiesToSet) {

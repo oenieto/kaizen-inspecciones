@@ -87,7 +87,7 @@ export const getInspeccionDetalle = cache(async (id: string): Promise<Inspeccion
       .eq("id", id)
       .order("tomada_en", { referencedTable: "evidencias" })
       .maybeSingle(),
-    supabase.from("bitacora").select("*").eq("entidad_id", id).order("timestamp", { ascending: false }),
+    supabase.from("bitacora").select("*").eq("entidad_id", id).eq("nivel", "evento").order("timestamp", { ascending: false }),
   ])
   const x = datos(fila)
   if (!x) return null

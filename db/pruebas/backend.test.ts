@@ -111,10 +111,21 @@ describe("aislamiento y permisos (RLS)", () => {
     assert.equal(coordUpd.data?.length ?? 0, 0)
     const folio = await adminUv.from("tenants").update({ serie_folio: "HACK" }).eq("id", tenantUv)
     assert.equal(folio.error?.code, "42501")
-    const ok = await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv).select().single()
+    const ok = await adminUv.from("tenants").update({ nombre_corto: "UV Energía Demo" }).eq("id", tenantUv).select().single()
     assert.ifError(ok.error)
-    const b = await adminUv.from("bitacora").select("descripcion").eq("entidad_id", tenantUv)
-    assert.ok(b.data!.some((x) => x.descripcion === "Branding actualizado"))
+    assert.ifError((await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv)).error)
+    const b = await adminUv.from("bitacora").select("descripcion, nivel, antes, despues").eq("entidad_id", tenantUv).order("timestamp")
+    const cambio = b.data!.find((x) => x.descripcion === "Branding actualizado")!
+    assert.equal(cambio.nivel, "evento")
+    // Solo los campos que cambiaron
+    assert.deepEqual(cambio.antes, { nombre_corto: "UV Energía" })
+    assert.deepEqual(cambio.despues, { nombre_corto: "UV Energía Demo" })
+  })
+
+  test("un UPDATE sin cambios no ensucia la bitácora", async () => {
+    const antes = (await adminUv.from("bitacora").select("id").eq("entidad_id", tenantUv)).data!.length
+    assert.ifError((await adminUv.from("tenants").update({ nombre_corto: "UV Energía" }).eq("id", tenantUv)).error)
+    assert.equal((await adminUv.from("bitacora").select("id").eq("entidad_id", tenantUv)).data!.length, antes)
   })
 
   test("el coordinador no aprueba dictámenes", async () => {
@@ -138,6 +149,19 @@ describe("agenda", () => {
     assert.equal(b.data!.usuario_id, yo.user!.id)
     const dup = await coord.from("clientes").insert({ rfc: "PRU010101AB1", razon_social: "Dup", giro: "Hotel", contacto: "a", telefono: "1234567", email: "a@b.mx" })
     assert.equal(dup.error?.code, "23505")
+  })
+
+  test("reprogramar: un evento con nombre y el detalle con antes/después", async () => {
+    const { data: x } = await coord.from("inspecciones").select("id, fecha").eq("estatus", "programada").limit(1).single()
+    const nueva = new Date(new Date(x!.fecha).getTime() + 86_400_000).toISOString()
+    assert.ifError((await coord.rpc("reprogramar_inspeccion", { p_id: x!.id, p_fecha: nueva })).error)
+    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", x!.id).order("timestamp", { ascending: false }).limit(2)
+    const evento = b!.find((e) => e.nivel === "evento")!
+    const detalle = b!.find((e) => e.nivel === "detalle")!
+    assert.match(evento.descripcion, /^Reprogramada a /)
+    assert.equal(detalle.accion, "actualizar")
+    assert.deepEqual(Object.keys(detalle.despues as object), ["fecha"])
+    assert.equal(new Date((detalle.antes as { fecha: string }).fecha).getTime(), new Date(x!.fecha).getTime())
   })
 
   test("solo se reprograman citas programadas", async () => {
@@ -254,8 +278,16 @@ describe("campo → revisión → dictamen", () => {
     const otraVez = await resp.rpc("aprobar_y_emitir", { p_id: inspeccionId })
     assert.equal(otraVez.error?.message, "Solo se aprueban inspecciones en revisión")
 
-    const b = await resp.from("bitacora").select("accion").eq("entidad_id", inspeccionId)
+    const b = await resp.from("bitacora").select("accion").eq("entidad_id", inspeccionId).eq("nivel", "evento")
     assert.deepEqual(new Set(b.data!.map((x) => x.accion)), new Set(["crear", "sincronizar", "aprobar", "emitir_dictamen"]))
+    // El acta guarda las firmas como hash, no la imagen
+    const { data: acta } = await resp.from("actas").select("id").eq("inspeccion_id", inspeccionId).single()
+    const { data: cambiosActa } = await resp.from("bitacora").select("despues").eq("entidad_id", acta!.id)
+    assert.ok(cambiosActa!.length > 0)
+    for (const c of cambiosActa!) {
+      const firma = (c.despues as { firma_cliente?: string }).firma_cliente
+      if (firma) assert.match(firma, /^sha256:[0-9a-f]{64}$/)
+    }
 
     const publico = createClient<Database>(url, anon, opciones)
     const v = await publico.rpc("verificar_dictamen", { p_token: nuestro.token_qr })

@@ -182,6 +182,13 @@ export type AccionBitacora =
   | "aprobar"
   | "emitir_dictamen"
   | "subir_evidencia"
+  | "eliminar"
+
+/**
+ * evento: lo que muestra la línea de tiempo del expediente.
+ * detalle: cambio de fila hecho dentro de una operación de flujo (solo auditoría).
+ */
+export type NivelBitacora = "evento" | "detalle"
 
 export interface EntradaBitacora {
   id: ID
@@ -192,6 +199,12 @@ export interface EntradaBitacora {
   descripcion: string
   usuarioId: ID
   timestamp: ISODate
+  nivel?: NivelBitacora
+  /** Valores anteriores de los campos que cambiaron (o la fila completa en una baja) */
+  antes?: Record<string, unknown> | null
+  /** Valores nuevos de los campos que cambiaron (o la fila completa en un alta) */
+  despues?: Record<string, unknown> | null
+  ip?: string | null
 }
 
 export interface Plantilla {

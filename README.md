@@ -144,8 +144,9 @@ Las firmas de `lib/data/*` siguen siendo el contrato con las pantallas; por dent
 | Aislamiento | Cada tabla lleva `tenant_id` (por defecto el del usuario). Políticas RLS por tenant y rol; el inspector solo ve sus inspecciones. Privilegios mínimos: escritura directa solo en alta de clientes, instalaciones y citas. |
 | Flujo | `reprogramar_inspeccion`, `cancelar_inspeccion`, `sincronizar_captura`, `devolver_a_campo` y `aprobar_y_emitir` son funciones SQL transaccionales: validan permiso y estatus, aplican el cambio y escriben la bitácora. Sus mensajes llegan tal cual al toast. |
 | Folio | `aprobar_y_emitir` bloquea la fila `(tenant, año)` de `folios`: aprobaciones simultáneas se serializan y una transacción fallida no consume consecutivo. |
-| Bitácora | Solo la escriben triggers y funciones (`auth.uid()` como autor). Un trigger rechaza UPDATE/DELETE/TRUNCATE en `bitacora` y `dictamenes`. |
+| Bitácora | Solo la escriben triggers y funciones (`auth.uid()` como autor). Un trigger rechaza UPDATE/DELETE/TRUNCATE en `bitacora` y `dictamenes`. El trigger genérico `app.bitacora_cambio` registra altas, cambios y bajas de usuarios en las tablas de negocio con `antes`/`despues` (solo los campos que cambiaron; las firmas como SHA-256) e `ip`. Nivel `evento` = línea de tiempo; `detalle` = cambio de fila dentro de una función de flujo (la función ya escribe el evento con nombre). `listBitacora` da la línea de tiempo y `listCambios` el registro completo. Las cargas con service_role (seed) no generan bitácora automática. |
 | Auth | Supabase Auth con correo y contraseña (registro público deshabilitado). `proxy.ts` refresca el token y protege rutas; `getSession()` conserva su forma. |
+| Tenant y rol | **Decisión: se leen de la tabla `usuarios`, no de claims del JWT.** `app.tenant_id()` / `app.rol()` en RLS (evaluadas una vez por consulta) y `getSession()` en Next (una consulta por petición que además trae el branding). Motivo: desactivar a un usuario o cambiarle el rol aplica en la siguiente petición; con claims el token viejo seguiría valiendo hasta expirar (1 h) y alguien dado de baja podría aprobar un dictamen. El ahorro del JWT es despreciable aquí. Revisarlo solo si se enruta por tenant en el edge (subdominios): entonces `tenant_id` en el JWT para enrutar, pero rol y `activo` se siguen leyendo de la tabla. Por eso no hay `lib/tenant.ts`: `lib/auth.ts` cumple ese papel. |
 | Evidencias | Bucket privado `evidencias/{tenant}/{inspección}/{foto}.jpg`. La PWA pide URLs firmadas de subida (`prepararSubidaFotos`), sube directo desde el dispositivo y la acción recibe rutas; la BD verifica que el objeto exista. Hash SHA-256 de los bytes JPEG: la PWA lo calcula al tomar la foto y el servidor lo recalcula sobre el objeto en Storage (si no coincide, rechaza). Las pantallas reciben URLs firmadas de 1 h. |
 | Dictamen | `/api/dictamen/[id]` llena la plantilla del bucket `plantillas/{tenant}/dictamen.docx` (o `templates/dictamen.docx`) con docxtemplater; etiquetas en `Plantilla.campos`. PDF con Gotenberg. |
 | IA | `evaluarCompletitud()`: las reglas dan el puntaje; Claude (`ANTHROPIC_MODEL`, por defecto `claude-opus-5-5`) agrega inconsistencias y la redacción de cada NC. En caché por contenido del expediente; si falla, quedan las reglas. Nunca dictamina. |
@@ -169,6 +170,8 @@ Las evidencias son idempotentes por `ruta` (única) y las fotos por su UUID.
 
 ## Pendientes conocidos
 
+- La IP de la bitácora es informativa: el servidor de Next la reenvía en `x-cliente-ip`, pero quien llame la API de Supabase directo con su token podría falsearla.
+- Pantalla de auditoría con `listCambios` (antes/después por campo): datos listos, falta la UI.
 - Mapa real: definir `NEXT_PUBLIC_MAPBOX_TOKEN`. Sin token se muestra un croquis.
 - Alta de usuarios desde Configuración (hoy: Supabase Auth + fila en `usuarios`).
 - Plantilla del acta en Word (`/api/acta`), cuando el cliente entregue su formato.
