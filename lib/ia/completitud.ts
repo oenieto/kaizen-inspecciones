@@ -5,6 +5,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod"
 import { z } from "zod"
 import type { InspeccionDetalle, Reactivo } from "@/lib/types"
+import { conLimiteIA, iaConfigurada, modeloIA } from "./uso"
 
 /**
  * «Semáforo de completitud» del expediente antes de dictaminar.
@@ -83,21 +84,28 @@ interface EntradaIA {
   reglasAutomaticas: string[]
 }
 
-/** En caché por contenido: el mismo expediente (mismas respuestas) no se vuelve a analizar. */
-async function analizarConIA(entrada: EntradaIA) {
+/**
+ * En caché por contenido: el mismo expediente (mismas respuestas) no se vuelve
+ * a analizar. Solo una llamada real al modelo cuenta contra el límite mensual
+ * del tenant y queda en ia_solicitudes (sin usuario: lo dispara abrir el expediente).
+ */
+async function analizarConIA(tenantId: string, entrada: EntradaIA) {
   "use cache"
   cacheLife("weeks")
-  const client = new Anthropic({ timeout: 60_000, maxRetries: 1 })
-  const respuesta = await client.messages.parse({
-    model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
-    max_tokens: 8000,
-    output_config: { effort: "low", format: zodOutputFormat(SalidaIA) },
-    system: SISTEMA,
-    messages: [{ role: "user", content: `Expediente (JSON):\n${JSON.stringify(entrada)}` }],
+  const { salida } = await conLimiteIA({ tenantId, usuarioId: null, funcion: "completitud" }, async () => {
+    const client = new Anthropic({ timeout: 60_000, maxRetries: 1 })
+    const respuesta = await client.messages.parse({
+      model: modeloIA(),
+      max_tokens: 8000,
+      output_config: { effort: "low", format: zodOutputFormat(SalidaIA) },
+      system: SISTEMA,
+      messages: [{ role: "user", content: `Expediente (JSON):\n${JSON.stringify(entrada)}` }],
+    })
+    if (respuesta.stop_reason === "refusal") throw new Error("El modelo declinó analizar el expediente")
+    if (!respuesta.parsed_output) throw new Error(`Salida sin estructura (stop_reason: ${respuesta.stop_reason})`)
+    return { salida: respuesta.parsed_output, respuesta }
   })
-  if (respuesta.stop_reason === "refusal") throw new Error("El modelo declinó analizar el expediente")
-  if (!respuesta.parsed_output) throw new Error(`Salida sin estructura (stop_reason: ${respuesta.stop_reason})`)
-  return respuesta.parsed_output
+  return salida
 }
 
 /**
@@ -107,11 +115,11 @@ async function analizarConIA(entrada: EntradaIA) {
 export const evaluarCompletitud = cache(async (x: InspeccionDetalle): Promise<ResultadoCompletitud> => {
   const reglas = evaluarReglas(x)
   const soloReglas: ResultadoCompletitud = { ...reglas, redacciones: {}, fuente: "reglas" }
-  if (!process.env.ANTHROPIC_API_KEY || x.respuestas.length === 0) return soloReglas
+  if (!iaConfigurada() || x.respuestas.length === 0) return soloReglas
 
   const fotos = x.evidencias.filter((e) => e.tipo === "foto")
   try {
-    const ia = await analizarConIA({
+    const ia = await analizarConIA(x.tenantId, {
       norma: `${x.norma.clave} — ${x.norma.titulo}`,
       reactivos: x.checklist.reactivos.map(({ id, numeral, seccion, texto, tipo, requerido, unidad }) => ({ id, numeral, seccion, texto, tipo, requerido, unidad })),
       respuestas: x.respuestas,

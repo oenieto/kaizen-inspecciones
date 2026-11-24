@@ -105,6 +105,7 @@ export const mapInstalacion = (i: Fila<"instalaciones">): Instalacion => ({
   lat: i.lat,
   lng: i.lng,
   permiso: i.permiso,
+  permisoVigencia: i.permiso_vigencia,
   vencimiento: isoONull(i.vencimiento),
 })
 

@@ -300,6 +300,81 @@ describe("campo → revisión → dictamen", () => {
   })
 })
 
+describe("IA: límite por tenant y trazabilidad de sugerencias", () => {
+  const sugerencia = { nombre: "Planta El Marqués", tipo: "Industrial", direccion: "Av. de la Montaña 112", municipio: "El Marqués", permiso: null, permisoVigencia: "2027-03-31" }
+
+  async function solicitudOk(tenant: string, usuario: string) {
+    const r = await admin.rpc("ia_reservar", { p_tenant: tenant, p_usuario: usuario, p_funcion: "ocr_permiso" })
+    assert.ifError(r.error)
+    assert.ifError(
+      (await admin.rpc("ia_completar", { p_id: r.data, p_modelo: "claude-opus-5-5", p_tokens_entrada: 1200, p_tokens_salida: 300, p_sugerencia: sugerencia, p_error: null })).error,
+    )
+    return r.data
+  }
+
+  test("un usuario no reserva ni registra llamadas al modelo", async () => {
+    const r = await coord.rpc("ia_reservar", { p_tenant: tenantUv, p_usuario: null, p_funcion: "ocr_permiso" })
+    assert.ok(r.error)
+  })
+
+  test("el límite mensual del tenant corta la siguiente llamada", async () => {
+    assert.ifError((await admin.from("tenants").update({ ia_limite_mensual: 1 }).eq("id", otroTenantId)).error)
+    assert.ifError((await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_usuario: null, p_funcion: "completitud" })).error)
+    const segunda = await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_usuario: null, p_funcion: "completitud" })
+    assert.equal(segunda.error?.message, "Se alcanzó el límite mensual de uso de IA (1 solicitudes)")
+  })
+
+  test("aceptada: la bitácora guarda lo sugerido, lo guardado y quién decidió", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const { data: inst } = await coord.from("instalaciones").select("id").limit(1).single()
+    // La IA no leyó el permiso (null): que la persona lo capture no cuenta como edición
+    const final = { ...sugerencia, permiso: "G/00123/DIS/2024" }
+    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_entidad: "instalacion", p_entidad_id: inst!.id, p_final: final })
+    assert.ifError(r.error)
+    assert.equal(r.data, "aceptada")
+
+    const { data: b } = await coord.from("bitacora").select("*").eq("entidad_id", inst!.id).eq("accion", "decision_ia").single()
+    assert.equal(b!.usuario_id, yo.user!.id)
+    assert.deepEqual(b!.antes, sugerencia)
+    assert.deepEqual(b!.despues, final)
+    assert.match(b!.descripcion, /aceptada por /)
+    const { data: sug } = await coord.from("bitacora").select("accion").eq("entidad_id", id).single()
+    assert.equal(sug!.accion, "sugerencia_ia")
+
+    const otraVez = await coord.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    assert.equal(otraVez.error?.message, "La sugerencia de IA ya se había resuelto")
+  })
+
+  test("editada: la persona cambió un dato que la IA sí propuso", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_entidad: null, p_entidad_id: null, p_final: { ...sugerencia, municipio: "Querétaro" } })
+    assert.equal(r.data, "editada")
+  })
+
+  test("el inspector no resuelve sugerencias y otro tenant no las ve", async () => {
+    const { data: yo } = await coord.auth.getUser()
+    const id = await solicitudOk(tenantUv, yo.user!.id)
+    const r = await insp.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    assert.equal(r.error?.message, "No tienes permiso para esta acción")
+    const otro = await sesion(OTRO.email)
+    assert.equal((await otro.from("ia_solicitudes").select("id").eq("id", id)).data!.length, 0)
+    const ajena = await otro.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    assert.equal(ajena.error?.message, "Sugerencia de IA no encontrada")
+  })
+
+  test("aprobar con la revisión de IA a la vista la deja en bitácora", async (t) => {
+    const { data } = await resp.from("inspecciones").select("id").eq("estatus", "en_revision").limit(1)
+    if (!data?.length) return t.skip("no quedan inspecciones en revisión en el seed")
+    const revision = { nivel: "amarillo", puntaje: 80, fuente: "ia", alertas: ["IA: R-07 medición poco plausible"], redacciones: {} }
+    assert.ifError((await resp.rpc("aprobar_y_emitir", { p_id: data[0].id, p_revision_ia: revision })).error)
+    const { data: b } = await resp.from("bitacora").select("*").eq("entidad_id", data[0].id).eq("accion", "decision_ia").single()
+    assert.deepEqual(b!.despues, revision)
+    assert.match(b!.descripcion, /semáforo amarillo, 1 alertas/)
+  })
+})
+
 test("dashboard agrega solo lo del tenant", async () => {
   const ahora = new Date()
   const r = await adminUv.rpc("dashboard", {

@@ -199,6 +199,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"ia_solicitudes": {
+                  Row: {
+                    "creado_en": string,"decidida_en": string | null,"decidida_por": string | null,"decision": string | null,"entidad": string | null,"entidad_id": string | null,"error": string | null,"estado": string,"funcion": string,"id": string,"modelo": string | null,"sugerencia": Json | null,"tenant_id": string,"tokens_entrada": number | null,"tokens_salida": number | null,"usuario_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "creado_en"?: string,"decidida_en"?: string | null,"decidida_por"?: string | null,"decision"?: string | null,"entidad"?: string | null,"entidad_id"?: string | null,"error"?: string | null,"estado"?: string,"funcion": string,"id"?: string,"modelo"?: string | null,"sugerencia"?: Json | null,"tenant_id": string,"tokens_entrada"?: number | null,"tokens_salida"?: number | null,"usuario_id"?: string | null
+                  }
+                  Update: {
+                    "creado_en"?: string,"decidida_en"?: string | null,"decidida_por"?: string | null,"decision"?: string | null,"entidad"?: string | null,"entidad_id"?: string | null,"error"?: string | null,"estado"?: string,"funcion"?: string,"id"?: string,"modelo"?: string | null,"sugerencia"?: Json | null,"tenant_id"?: string,"tokens_entrada"?: number | null,"tokens_salida"?: number | null,"usuario_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "ia_solicitudes_tenant_id_fkey"
+      columns: ["tenant_id"]
+isOneToOne: false
+      referencedRelation: "tenants"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"inspecciones": {
                   Row: {
                     "checklist_id": string,"creado_en": string,"duracion_min": number,"enviada_revision_en": string | null,"estatus": Database["public"]['Enums']["estatus_inspeccion"],"fecha": string,"id": string,"iniciada_en": string | null,"inspector_id": string,"instalacion_id": string,"norma_id": string,"observaciones": string,"respuestas": NonNullable<Json>,"sincronizada_en": string | null,"tenant_id": string,"version": number
@@ -257,14 +277,14 @@ isOneToOne: false
                   ]
                 },"instalaciones": {
                   Row: {
-                    "cliente_id": string,"direccion": string,"id": string,"lat": number,"lng": number,"municipio": string,"nombre": string,"permiso": string,"tenant_id": string,"tipo": string,"vencimiento": string | null
+                    "cliente_id": string,"direccion": string,"id": string,"lat": number,"lng": number,"municipio": string,"nombre": string,"permiso": string,"permiso_vigencia": string | null,"tenant_id": string,"tipo": string,"vencimiento": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "cliente_id": string,"direccion": string,"id"?: string,"lat": number,"lng": number,"municipio": string,"nombre": string,"permiso"?: string,"tenant_id"?: string,"tipo": string,"vencimiento"?: string | null
+                    "cliente_id": string,"direccion": string,"id"?: string,"lat": number,"lng": number,"municipio": string,"nombre": string,"permiso"?: string,"permiso_vigencia"?: string | null,"tenant_id"?: string,"tipo": string,"vencimiento"?: string | null
                   }
                   Update: {
-                    "cliente_id"?: string,"direccion"?: string,"id"?: string,"lat"?: number,"lng"?: number,"municipio"?: string,"nombre"?: string,"permiso"?: string,"tenant_id"?: string,"tipo"?: string,"vencimiento"?: string | null
+                    "cliente_id"?: string,"direccion"?: string,"id"?: string,"lat"?: number,"lng"?: number,"municipio"?: string,"nombre"?: string,"permiso"?: string,"permiso_vigencia"?: string | null,"tenant_id"?: string,"tipo"?: string,"vencimiento"?: string | null
                   }
                   Relationships: [
                     {
@@ -335,14 +355,14 @@ isOneToOne: false
                   ]
                 },"tenants": {
                   Row: {
-                    "acreditacion_desde": string,"acreditacion_ema": string,"ciudad": string,"color_primario": string,"creado_en": string,"id": string,"logo_url": string | null,"nombre_corto": string,"rama": string,"razon_social": string,"serie_folio": string,"sitio_web": string,"slug": string,"vigencia_dictamen_meses": number,"zona_horaria": string
+                    "acreditacion_desde": string,"acreditacion_ema": string,"ciudad": string,"color_primario": string,"creado_en": string,"ia_limite_mensual": number,"id": string,"logo_url": string | null,"nombre_corto": string,"rama": string,"razon_social": string,"serie_folio": string,"sitio_web": string,"slug": string,"vigencia_dictamen_meses": number,"zona_horaria": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "acreditacion_desde": string,"acreditacion_ema": string,"ciudad"?: string,"color_primario"?: string,"creado_en"?: string,"id"?: string,"logo_url"?: string | null,"nombre_corto": string,"rama": string,"razon_social": string,"serie_folio": string,"sitio_web"?: string,"slug": string,"vigencia_dictamen_meses"?: number,"zona_horaria"?: string
+                    "acreditacion_desde": string,"acreditacion_ema": string,"ciudad"?: string,"color_primario"?: string,"creado_en"?: string,"ia_limite_mensual"?: number,"id"?: string,"logo_url"?: string | null,"nombre_corto": string,"rama": string,"razon_social": string,"serie_folio": string,"sitio_web"?: string,"slug": string,"vigencia_dictamen_meses"?: number,"zona_horaria"?: string
                   }
                   Update: {
-                    "acreditacion_desde"?: string,"acreditacion_ema"?: string,"ciudad"?: string,"color_primario"?: string,"creado_en"?: string,"id"?: string,"logo_url"?: string | null,"nombre_corto"?: string,"rama"?: string,"razon_social"?: string,"serie_folio"?: string,"sitio_web"?: string,"slug"?: string,"vigencia_dictamen_meses"?: number,"zona_horaria"?: string
+                    "acreditacion_desde"?: string,"acreditacion_ema"?: string,"ciudad"?: string,"color_primario"?: string,"creado_en"?: string,"ia_limite_mensual"?: number,"id"?: string,"logo_url"?: string | null,"nombre_corto"?: string,"rama"?: string,"razon_social"?: string,"serie_folio"?: string,"sitio_web"?: string,"slug"?: string,"vigencia_dictamen_meses"?: number,"zona_horaria"?: string
                   }
                   Relationships: [
                     
@@ -446,7 +466,7 @@ isOneToOne: false
           }
           Functions: {
             "aprobar_y_emitir":
-{ Args: { "p_id": string }; Returns: {
+{ Args: { "p_id": string,"p_revision_ia"?: Json }; Returns: {
               "aprobado_por": string,
 "emitido_en": string,
 "folio": string,
@@ -472,6 +492,15 @@ isOneToOne: false
 "devolver_a_campo":
 { Args: { "p_id": string,"p_motivo": string }; Returns: undefined
                            },
+"ia_completar":
+{ Args: { "p_error": string | null,"p_id": string,"p_modelo": string,"p_sugerencia": Json | null,"p_tokens_entrada": number | null,"p_tokens_salida": number | null }; Returns: undefined
+                           },
+"ia_reservar":
+{ Args: { "p_funcion": string,"p_tenant": string,"p_usuario": string | null }; Returns: string
+                           },
+"ia_resolver":
+{ Args: { "p_descartar": boolean,"p_entidad": string | null,"p_entidad_id": string | null,"p_final": Json | null,"p_id": string }; Returns: string
+                           },
 "purgar_datos_tenant":
 { Args: { "p_tenant": string }; Returns: undefined
                            },
@@ -489,7 +518,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "accion_bitacora": "crear"|"actualizar"|"cambiar_estatus"|"sincronizar"|"aprobar"|"emitir_dictamen"|"subir_evidencia"|"eliminar","estatus_inspeccion": "programada"|"en_curso"|"en_revision"|"dictaminada"|"cancelada","resultado_dictamen": "cumple"|"no_cumple","rol": "admin"|"coordinador"|"inspector"|"responsable","tipo_evidencia": "foto"|"documento","tipo_plantilla": "acta"|"dictamen"
+            "accion_bitacora": "crear"|"actualizar"|"cambiar_estatus"|"sincronizar"|"aprobar"|"emitir_dictamen"|"subir_evidencia"|"eliminar"|"sugerencia_ia"|"decision_ia","estatus_inspeccion": "programada"|"en_curso"|"en_revision"|"dictaminada"|"cancelada","resultado_dictamen": "cumple"|"no_cumple","rol": "admin"|"coordinador"|"inspector"|"responsable","tipo_evidencia": "foto"|"documento","tipo_plantilla": "acta"|"dictamen"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -605,7 +634,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "accion_bitacora": ["crear", "actualizar", "cambiar_estatus", "sincronizar", "aprobar", "emitir_dictamen", "subir_evidencia", "eliminar"],"estatus_inspeccion": ["programada", "en_curso", "en_revision", "dictaminada", "cancelada"],"resultado_dictamen": ["cumple", "no_cumple"],"rol": ["admin", "coordinador", "inspector", "responsable"],"tipo_evidencia": ["foto", "documento"],"tipo_plantilla": ["acta", "dictamen"]
+            "accion_bitacora": ["crear", "actualizar", "cambiar_estatus", "sincronizar", "aprobar", "emitir_dictamen", "subir_evidencia", "eliminar", "sugerencia_ia", "decision_ia"],"estatus_inspeccion": ["programada", "en_curso", "en_revision", "dictaminada", "cancelada"],"resultado_dictamen": ["cumple", "no_cumple"],"rol": ["admin", "coordinador", "inspector", "responsable"],"tipo_evidencia": ["foto", "documento"],"tipo_plantilla": ["acta", "dictamen"]
           }
         }
 } as const

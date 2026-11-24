@@ -186,7 +186,18 @@ export async function devolverACampo(id: string, motivo: string) {
  * Aprobación del responsable técnico: función SQL transaccional que asigna el
  * folio consecutivo sin huecos (bloqueo de la fila de folios) y emite el dictamen.
  */
-export async function aprobarYEmitir(id: string) {
+export async function aprobarYEmitir(id: string, revisionIa?: RevisionIA) {
   const supabase = await createClient()
-  return mapDictamen(datos(await supabase.rpc("aprobar_y_emitir", { p_id: id })))
+  return mapDictamen(
+    datos(await supabase.rpc("aprobar_y_emitir", { p_id: id, p_revision_ia: revisionIa as unknown as Json | undefined })),
+  )
+}
+
+/** Lo que el semáforo de completitud mostraba al aprobar (queda en bitácora con quién aprobó). */
+export interface RevisionIA {
+  nivel: "verde" | "amarillo" | "rojo"
+  puntaje: number
+  fuente: "ia" | "reglas"
+  alertas: string[]
+  redacciones: Record<string, string>
 }

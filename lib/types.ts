@@ -95,6 +95,8 @@ export interface Instalacion {
   lat: number
   lng: number
   permiso: string
+  /** Vigencia del permiso o constancia del cliente (YYYY-MM-DD), si se conoce */
+  permisoVigencia?: string | null
   /** Fecha en que vence su dictamen vigente (o null si nunca se ha dictaminado) */
   vencimiento: ISODate | null
 }
@@ -183,6 +185,10 @@ export type AccionBitacora =
   | "emitir_dictamen"
   | "subir_evidencia"
   | "eliminar"
+  /** Lo que propuso la IA (nunca decide) */
+  | "sugerencia_ia"
+  /** Una persona aceptó, editó o descartó lo que propuso la IA */
+  | "decision_ia"
 
 /**
  * evento: lo que muestra la línea de tiempo del expediente.
