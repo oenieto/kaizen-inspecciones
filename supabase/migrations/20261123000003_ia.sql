@@ -56,7 +56,10 @@ create policy ia_solicitudes_select on public.ia_solicitudes for select to authe
 
 /* ---------- Servidor (service_role) ---------- */
 
-create function public.ia_reservar(p_tenant uuid, p_usuario uuid, p_funcion text) returns uuid
+-- Los parámetros que pueden ir vacíos llevan `default null` y van al final:
+-- así `pnpm db:types` los genera como opcionales y el código los omite.
+
+create function public.ia_reservar(p_tenant uuid, p_funcion text, p_usuario uuid default null) returns uuid
 language plpgsql security definer set search_path = '' as $$
 declare
   t public.tenants;
@@ -82,7 +85,9 @@ begin
 end $$;
 
 create function public.ia_completar(
-  p_id uuid, p_modelo text, p_tokens_entrada int, p_tokens_salida int, p_sugerencia jsonb, p_error text
+  p_id uuid, p_modelo text,
+  p_tokens_entrada int default null, p_tokens_salida int default null,
+  p_sugerencia jsonb default null, p_error text default null
 ) returns void
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -112,7 +117,8 @@ end $$;
 -- aceptada = guardó lo sugerido; editada = cambió algún valor que la IA sí propuso;
 -- descartada = no usó la sugerencia.
 create function public.ia_resolver(
-  p_id uuid, p_descartar boolean, p_entidad text, p_entidad_id uuid, p_final jsonb
+  p_id uuid, p_descartar boolean,
+  p_entidad text default null, p_entidad_id uuid default null, p_final jsonb default null
 ) returns text
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -258,11 +264,11 @@ end $$;
 /* ---------- Privilegios ---------- */
 
 revoke all on function
-  public.ia_reservar(uuid, uuid, text),
+  public.ia_reservar(uuid, text, uuid),
   public.ia_completar(uuid, text, int, int, jsonb, text),
   public.ia_resolver(uuid, boolean, text, uuid, jsonb),
   public.aprobar_y_emitir(uuid, jsonb)
 from public, anon, authenticated;
 
-grant execute on function public.ia_reservar(uuid, uuid, text), public.ia_completar(uuid, text, int, int, jsonb, text) to service_role;
+grant execute on function public.ia_reservar(uuid, text, uuid), public.ia_completar(uuid, text, int, int, jsonb, text) to service_role;
 grant execute on function public.ia_resolver(uuid, boolean, text, uuid, jsonb), public.aprobar_y_emitir(uuid, jsonb) to authenticated;

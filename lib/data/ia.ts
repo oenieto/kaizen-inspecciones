@@ -16,12 +16,11 @@ export async function resolverSugerenciaIA(
 ): Promise<DecisionIA> {
   const supabase = await createClient()
   return datos(
-    await supabase.rpc("ia_resolver", {
-      p_id: solicitudId,
-      p_descartar: Boolean(r.descartar),
-      p_entidad: r.descartar ? null : r.entidad,
-      p_entidad_id: r.descartar ? null : r.entidadId,
-      p_final: r.descartar ? null : (r.final as Json),
-    }),
+    await supabase.rpc(
+      "ia_resolver",
+      r.descartar
+        ? { p_id: solicitudId, p_descartar: true }
+        : { p_id: solicitudId, p_descartar: false, p_entidad: r.entidad, p_entidad_id: r.entidadId, p_final: r.final as Json },
+    ),
   ) as DecisionIA
 }

@@ -38,7 +38,7 @@ export async function conLimiteIA<T>(
   aSugerencia: (salida: T) => unknown = (s) => s,
 ): Promise<{ salida: T; solicitudId: string }> {
   const admin = createAdminClient()
-  const reserva = await admin.rpc("ia_reservar", { p_tenant: ctx.tenantId, p_usuario: ctx.usuarioId, p_funcion: ctx.funcion })
+  const reserva = await admin.rpc("ia_reservar", { p_tenant: ctx.tenantId, p_funcion: ctx.funcion, p_usuario: ctx.usuarioId ?? undefined })
   if (reserva.error) throw new Error(reserva.error.message)
   const solicitudId = reserva.data
 
@@ -49,27 +49,21 @@ export async function conLimiteIA<T>(
       p_tokens_entrada: respuesta.usage.input_tokens,
       p_tokens_salida: respuesta.usage.output_tokens,
       p_sugerencia: aSugerencia(salida) as Json,
-      p_error: null,
     })
     return { salida, solicitudId }
   } catch (e) {
-    await completar(solicitudId, {
-      p_modelo: modeloIA(),
-      p_tokens_entrada: null,
-      p_tokens_salida: null,
-      p_sugerencia: null,
-      p_error: e instanceof Error ? e.message : String(e),
-    })
+    await completar(solicitudId, { p_modelo: modeloIA(), p_error: e instanceof Error ? e.message : String(e) })
     throw e
   }
 }
 
+/** Sin p_error = la llamada salió bien. */
 interface Cierre {
   p_modelo: string
-  p_tokens_entrada: number | null
-  p_tokens_salida: number | null
-  p_sugerencia: Json | null
-  p_error: string | null
+  p_tokens_entrada?: number
+  p_tokens_salida?: number
+  p_sugerencia?: Json
+  p_error?: string
 }
 
 async function completar(id: string, datos: Cierre) {

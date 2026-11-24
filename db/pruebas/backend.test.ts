@@ -307,20 +307,20 @@ describe("IA: límite por tenant y trazabilidad de sugerencias", () => {
     const r = await admin.rpc("ia_reservar", { p_tenant: tenant, p_usuario: usuario, p_funcion: "ocr_permiso" })
     assert.ifError(r.error)
     assert.ifError(
-      (await admin.rpc("ia_completar", { p_id: r.data, p_modelo: "claude-opus-5-5", p_tokens_entrada: 1200, p_tokens_salida: 300, p_sugerencia: sugerencia, p_error: null })).error,
+      (await admin.rpc("ia_completar", { p_id: r.data, p_modelo: "claude-opus-5-5", p_tokens_entrada: 1200, p_tokens_salida: 300, p_sugerencia: sugerencia })).error,
     )
     return r.data
   }
 
   test("un usuario no reserva ni registra llamadas al modelo", async () => {
-    const r = await coord.rpc("ia_reservar", { p_tenant: tenantUv, p_usuario: null, p_funcion: "ocr_permiso" })
+    const r = await coord.rpc("ia_reservar", { p_tenant: tenantUv, p_funcion: "ocr_permiso" })
     assert.ok(r.error)
   })
 
   test("el límite mensual del tenant corta la siguiente llamada", async () => {
     assert.ifError((await admin.from("tenants").update({ ia_limite_mensual: 1 }).eq("id", otroTenantId)).error)
-    assert.ifError((await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_usuario: null, p_funcion: "completitud" })).error)
-    const segunda = await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_usuario: null, p_funcion: "completitud" })
+    assert.ifError((await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_funcion: "completitud" })).error)
+    const segunda = await admin.rpc("ia_reservar", { p_tenant: otroTenantId, p_funcion: "completitud" })
     assert.equal(segunda.error?.message, "Se alcanzó el límite mensual de uso de IA (1 solicitudes)")
   })
 
@@ -342,25 +342,25 @@ describe("IA: límite por tenant y trazabilidad de sugerencias", () => {
     const { data: sug } = await coord.from("bitacora").select("accion").eq("entidad_id", id).single()
     assert.equal(sug!.accion, "sugerencia_ia")
 
-    const otraVez = await coord.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    const otraVez = await coord.rpc("ia_resolver", { p_id: id, p_descartar: true })
     assert.equal(otraVez.error?.message, "La sugerencia de IA ya se había resuelto")
   })
 
   test("editada: la persona cambió un dato que la IA sí propuso", async () => {
     const { data: yo } = await coord.auth.getUser()
     const id = await solicitudOk(tenantUv, yo.user!.id)
-    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_entidad: null, p_entidad_id: null, p_final: { ...sugerencia, municipio: "Querétaro" } })
+    const r = await coord.rpc("ia_resolver", { p_id: id, p_descartar: false, p_final: { ...sugerencia, municipio: "Querétaro" } })
     assert.equal(r.data, "editada")
   })
 
   test("el inspector no resuelve sugerencias y otro tenant no las ve", async () => {
     const { data: yo } = await coord.auth.getUser()
     const id = await solicitudOk(tenantUv, yo.user!.id)
-    const r = await insp.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    const r = await insp.rpc("ia_resolver", { p_id: id, p_descartar: true })
     assert.equal(r.error?.message, "No tienes permiso para esta acción")
     const otro = await sesion(OTRO.email)
     assert.equal((await otro.from("ia_solicitudes").select("id").eq("id", id)).data!.length, 0)
-    const ajena = await otro.rpc("ia_resolver", { p_id: id, p_descartar: true, p_entidad: null, p_entidad_id: null, p_final: null })
+    const ajena = await otro.rpc("ia_resolver", { p_id: id, p_descartar: true })
     assert.equal(ajena.error?.message, "Sugerencia de IA no encontrada")
   })
 
